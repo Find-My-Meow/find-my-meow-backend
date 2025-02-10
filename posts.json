@@ -1,0 +1,47 @@
+[
+    {
+        "title": "pp",
+        "color": "เทา",
+        "breed": "persia",
+        "province": "กรุงเทพมหานคร",
+        "district": "คลองสามวา",
+        "sub_district": "ทรายกองดินใต้",
+        "extra_details": "0999999999",
+        "cat_info": "เล็ก",
+        "image_path": "/uploads/cat-9-week-old-british-shorthair-kitten-8182444.jpg.webp",
+        "email_preference": "รับ",
+        "gender": "เพศผู้",
+        "post_type": "lostcat",
+        "date": "2025-01-14"
+    },
+    {
+        "title": "",
+        "color": "เทา",
+        "breed": "persia",
+        "province": "กรุงเทพมหานคร",
+        "district": "คันนายาว",
+        "sub_district": "รามอินทรา",
+        "extra_details": "jj",
+        "cat_info": "เล็ก",
+        "image_path": "/uploads/cat-9-week-old-british-shorthair-kitten-8182444.jpg.webp",
+        "email_preference": "รับ",
+        "gender": "เพศเมีย",
+        "post_type": "foundcat",
+        "date": ""
+    },
+    {
+        "title": "",
+        "color": "เทา",
+        "breed": "dee",
+        "province": "กระบี่",
+        "district": "เขาพนม",
+        "sub_district": "หน้าเขา",
+        "extra_details": "ii",
+        "cat_info": "ll",
+        "image_path": "/uploads/british_shorthair_grooming_4_600x600.webp",
+        "email_preference": "รับ",
+        "gender": "เพศเมีย",
+        "post_type": "adoptcat",
+        "date": ""
+    }
+]

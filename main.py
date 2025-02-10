@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from database import lifespan
 from routes.posts import post_router
 from routes.search import search_router
