@@ -21,9 +21,11 @@ async def search_posts(
     if sub_district:
         query["location.sub_district"] = sub_district
 
-    posts = await db.database["posts"].find(query).to_list(100)  # Limit to 100 results
+    # Limit to 100 results
+    posts = await db.database["posts"].find(query).to_list(100)
     if not posts:
-        raise HTTPException(status_code=404, detail="No posts found matching the location")
+        raise HTTPException(
+            status_code=404, detail="No posts found matching the location")
 
     # Convert ObjectId to string
     for post in posts:
