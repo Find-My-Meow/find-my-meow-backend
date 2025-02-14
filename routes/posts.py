@@ -1,7 +1,8 @@
-import datetime
+import base64
 import json
 import os
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile
+from fastapi.responses import JSONResponse
 from database import db
 from bson import ObjectId
 from typing import List, Optional
@@ -9,29 +10,53 @@ from models.post import Post
 
 
 post_router = APIRouter()
-
-# Create new post
 @post_router.post("/", response_model=Post)
-async def create_post(post: Post):
-    post_dict = post.model_dump()
-
-    # Generate a unique ObjectId and set as post_id
+async def create_post(
+    user_id: str = Form(...),
+    cat_name: str = Form(None),
+    gender: str = Form(...),
+    color: str = Form(...),
+    breed: str = Form(...),
+    cat_marking: str = Form(None),
+    location: str = Form(...), 
+    lost_date: str = Form(None),
+    other_information: str = Form(None),
+    email_notification: bool = Form(...),
+    post_type: str = Form(...),
+    cat_image: str = Form(...) 
+):
     post_id = ObjectId()
-    post_dict["_id"] = post_id
-    post_dict["post_id"] = str(post_id)  # Store as string for response
+    image_id = str(ObjectId())  
 
-    # generate image_id
-    if not post_dict["cat_image"].get("image_id"):
-        post_dict["cat_image"]["image_id"] = str(ObjectId())
+    try:
+        location_data = json.loads(location)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid location format")
 
-    # Insert into database
+    post_dict = {
+        "post_id": str(post_id),
+        "user_id": user_id,
+        "cat_name": cat_name,
+        "gender": gender,
+        "color": color,
+        "breed": breed,
+        "cat_marking": cat_marking,
+        "location": location_data,
+        "lost_date": lost_date,
+        "other_information": other_information,
+        "email_notification": email_notification,
+        "post_type": post_type,
+        "cat_image": {  
+            "image_id": image_id,
+            "image_path": f"{cat_image}"  
+        },
+    }
+
+    # Insert into MongoDB
     result = await db.database["posts"].insert_one(post_dict)
     
     if result.inserted_id:
-        # Retrieve the inserted document and return it
-        created_post = await db.database["posts"].find_one({"_id": result.inserted_id})
-        created_post["_id"] = str(created_post["_id"])
-        return created_post
+        return post_dict 
 
     raise HTTPException(status_code=500, detail="Failed to create post")
 
@@ -53,7 +78,7 @@ async def list_posts(post_type: Optional[str] = None):
 @post_router.get("/{post_id}", response_model=Post)
 async def get_post(post_id: str):
     try:
-        post = await db.database["posts"].find_one({"_id": ObjectId(post_id)})
+        post = await db.database["posts"].find_one({"post_id": str(post_id)})
     except:
         raise HTTPException(status_code=400, detail="Invalid post ID format")  # invalid ID
 
@@ -102,3 +127,51 @@ async def delete_post(post_id: str):
         return {"message": "Post deleted successfully"}
 
     raise HTTPException(status_code=404, detail="Post not found")
+
+@post_router.post("/upload_image", response_model=dict)
+async def upload_image(file: UploadFile = File(...)):
+    image_id = str(ObjectId())  # Generate a unique image ID
+    image_filename = file.filename
+    image_path = os.path.join("uploads", image_filename)
+
+    # Ensure the upload directory exists
+    os.makedirs(os.path.dirname(image_path), exist_ok=True)
+
+    # Save the image to the local filesystem
+    with open(image_path, "wb") as image_file:
+        image_file.write(await file.read())  # Save the file content to disk
+
+    # After saving, open the file again to encode it to Base64
+    with open(image_path, "rb") as image_file:
+        file_content = image_file.read()
+        base64_encoded = base64.b64encode(file_content).decode("utf-8")
+
+    # Save the image metadata & Base64 data to MongoDB
+    image_doc = {
+        "_id": image_id,
+        "filename": image_filename,  # Store the original filename
+        "image_data": base64_encoded,  # Store Base64 image data
+    }
+
+    # Save the image document to the database
+    await db.database["images"].insert_one(image_doc)
+
+    return {"image_path": image_path, "filename": image_filename}
+
+
+@post_router.get("/image/{filename}")
+async def get_image_by_filename(filename: str):
+    image = await db.database["images"].find_one({"filename": filename})
+
+    if not image:
+        return JSONResponse(content={"error": "Image not found"}, status_code=404)
+
+    base64_data = image.get("image_data")
+    if base64_data:
+        try:
+            image_bytes = base64.b64decode(base64_data)
+            return Response(content=image_bytes, media_type="image/jpeg")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error decoding image: {e}")
+
+    return JSONResponse(content={"error": "No image data found"}, status_code=404)
