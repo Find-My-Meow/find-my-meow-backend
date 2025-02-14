@@ -54,7 +54,7 @@ async def create_post(
 
     # Insert into MongoDB
     result = await db.database["posts"].insert_one(post_dict)
-    
+
     if result.inserted_id:
         return post_dict 
 
@@ -70,7 +70,7 @@ async def list_posts(post_type: Optional[str] = None):
     posts = await db.database["posts"].find(query).to_list(length=100)
 
     for post in posts:
-        post["_id"] = str(post["_id"])  
+        post["_id"] = str(post["_id"])
 
     return posts
 
@@ -80,7 +80,8 @@ async def get_post(post_id: str):
     try:
         post = await db.database["posts"].find_one({"post_id": str(post_id)})
     except:
-        raise HTTPException(status_code=400, detail="Invalid post ID format")  # invalid ID
+        raise HTTPException(
+            status_code=400, detail="Invalid post ID format")  # invalid ID
 
     if post:
         post["_id"] = str(post["_id"])
@@ -97,7 +98,8 @@ async def edit_post(post_id: str, post_data: Post):
         raise HTTPException(status_code=400, detail="Invalid post ID")
 
     # Convert the update model to a dictionary and remove `None` values
-    update_data = {k: v for k, v in post_data.model_dump().items() if v is not None}
+    update_data = {k: v for k, v in post_data.model_dump().items()
+                   if v is not None}
 
     if not update_data:
         raise HTTPException(
@@ -110,7 +112,7 @@ async def edit_post(post_id: str, post_data: Post):
         updated_post = await db.database["posts"].find_one({"_id": post_object_id})
         updated_post["_id"] = str(updated_post["_id"])
         return updated_post
-    
+
     raise HTTPException(
         status_code=404, detail="Post not found or no changes made.")
 
