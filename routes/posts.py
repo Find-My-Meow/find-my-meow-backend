@@ -92,29 +92,29 @@ async def get_post(post_id: str):
 # Update post by ID
 @post_router.put("/{post_id}", response_model=Post)
 async def edit_post(post_id: str, post_data: Post):
-    try:
-        post_object_id = ObjectId(post_id)
-    except:
-        raise HTTPException(status_code=400, detail="Invalid post ID")
+    post = await db.database["posts"].find_one({"post_id": post_id})
 
-    # Convert the update model to a dictionary and remove `None` values
-    update_data = {k: v for k, v in post_data.model_dump().items()
-                   if v is not None}
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found.")
+    
+    # Convert the update model to a dictionary and remove None values
+    update_data = {k: v for k, v in post_data.model_dump().items() if v is not None}
 
     if not update_data:
-        raise HTTPException(
-            status_code=400, detail="No data provided to update the post.")
+        raise HTTPException(status_code=400, detail="No data provided to update the post.")
+    
+    # Perform the update operation
+    result = await db.database["posts"].update_one({"post_id": post_id}, {"$set": update_data})
 
-    result = await db.database["posts"].update_one({"_id": post_object_id}, {"$set": update_data})
-
-    if result.modified_count == 1:
-        # Retrieve the updated post
-        updated_post = await db.database["posts"].find_one({"_id": post_object_id})
-        updated_post["_id"] = str(updated_post["_id"])
+    # If no post is modified, raise an error
+    if result.matched_count == 1:
+        # Retrieve the updated post from the database
+        updated_post = await db.database["posts"].find_one({"post_id": post_id})
+        updated_post["_id"] = str(updated_post["_id"])  # Convert ObjectId to string for the response
         return updated_post
 
-    raise HTTPException(
-        status_code=404, detail="Post not found or no changes made.")
+    raise HTTPException(status_code=400, detail="Failed to update the post.")
+
 
 # Delete post by ID
 @post_router.delete("/{post_id}", response_model=dict)
@@ -134,31 +134,20 @@ async def delete_post(post_id: str):
 async def upload_image(file: UploadFile = File(...)):
     image_id = str(ObjectId())  # Generate a unique image ID
     image_filename = file.filename
-    image_path = os.path.join("uploads", image_filename)
 
-    # Ensure the upload directory exists
-    os.makedirs(os.path.dirname(image_path), exist_ok=True)
+    file_content = await file.read()
+    base64_encoded = base64.b64encode(file_content).decode("utf-8")
 
-    # Save the image to the local filesystem
-    with open(image_path, "wb") as image_file:
-        image_file.write(await file.read())  # Save the file content to disk
-
-    # After saving, open the file again to encode it to Base64
-    with open(image_path, "rb") as image_file:
-        file_content = image_file.read()
-        base64_encoded = base64.b64encode(file_content).decode("utf-8")
-
-    # Save the image metadata & Base64 data to MongoDB
     image_doc = {
         "_id": image_id,
-        "filename": image_filename,  # Store the original filename
-        "image_data": base64_encoded,  # Store Base64 image data
+        "filename": image_filename, 
+        "image_data": base64_encoded, 
     }
 
-    # Save the image document to the database
     await db.database["images"].insert_one(image_doc)
 
-    return {"image_path": image_path, "filename": image_filename}
+    return {"filename": image_filename}
+
 
 
 @post_router.get("/image/{filename}")
@@ -177,3 +166,41 @@ async def get_image_by_filename(filename: str):
             raise HTTPException(status_code=500, detail=f"Error decoding image: {e}")
 
     return JSONResponse(content={"error": "No image data found"}, status_code=404)
+
+@post_router.put("/upload_image/{filename}", response_model=dict)
+async def update_image(filename: str, file: UploadFile = File(...)):
+    image_doc = await db.database["images"].find_one({"filename": filename})
+    
+    if not image_doc:
+        raise HTTPException(status_code=404, detail="Image not found.")
+
+    file_content = await file.read()
+    base64_encoded = base64.b64encode(file_content).decode("utf-8")
+
+    updated_image_data = {
+        "filename": file.filename,  
+        "image_data": base64_encoded, 
+    }
+
+    result = await db.database["images"].update_one(
+        {"filename": filename},
+        {"$set": updated_image_data},
+    )
+
+    if result.modified_count == 1:
+        updated_posts = await db.database["posts"].update_many(
+            {"cat_image.image_path": {"$regex": filename}}, 
+            {
+                "$set": {
+                    "cat_image.filename": file.filename,
+                    "cat_image.image_data": base64_encoded 
+                }
+            }
+        )
+
+        if updated_posts.modified_count > 0:
+            return {"message": "Image and post(s) updated successfully", "filename": file.filename}
+
+        return {"message": "Image updated successfully, but no posts were found to update"}
+
+    raise HTTPException(status_code=400, detail="Failed to update the image.")
