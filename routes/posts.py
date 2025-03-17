@@ -1,179 +1,253 @@
-import base64
-import json
-import os
-from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile
-from fastapi.responses import JSONResponse
-from database import db
-from bson import ObjectId
+import traceback
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from core.database import db
 from typing import List, Optional
+from models.image import Image
 from models.post import Post
+from services.image_service import delete_image_service, upload_cat_image
+from services.post_service import parse_location, parse_lost_date
+from utils.utils import get_next_post_id
 
 
 post_router = APIRouter()
+
+# TODO: add post status
+
+
 @post_router.post("/", response_model=Post)
 async def create_post(
     user_id: str = Form(...),
-    cat_name: str = Form(None),
+    cat_name: Optional[str] = Form(None),
     gender: str = Form(...),
     color: str = Form(...),
     breed: str = Form(...),
-    cat_marking: str = Form(None),
-    location: str = Form(...), 
-    lost_date: str = Form(None),
-    other_information: str = Form(None),
+    cat_marking: Optional[str] = Form(None),
+    location: str = Form(...),
+    lost_date: Optional[str] = Form(None),
+    other_information: Optional[str] = Form(None),
     email_notification: bool = Form(...),
     post_type: str = Form(...),
-    cat_image: str = Form(...) 
+    cat_image: UploadFile = File(...),
 ):
-    post_id = ObjectId()
-    image_id = str(ObjectId())  
-
+    """
+    Creates a new post with a cat image.
+    """
+    uploaded_image = None
     try:
-        location_data = json.loads(location)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid location format")
+        # Parse Location JSON String
+        location_obj = parse_location(location)
 
-    post_dict = {
-        "post_id": str(post_id),
-        "user_id": user_id,
+        # Upload image
+        uploaded_image = await upload_cat_image(cat_image)
+
+        # Generate Post ID
+        post_id = await get_next_post_id()
+
+        # Convert string to datetime
+        lost_date_parsed = parse_lost_date(
+            lost_date) if lost_date else None
+
+        # Insert new post to database
+        post_obj = Post(
+            post_id=post_id,
+            user_id=user_id,
+            cat_name=cat_name,
+            gender=gender,
+            color=color,
+            breed=breed,
+            cat_marking=cat_marking,
+            location=location_obj,
+            lost_date=lost_date_parsed,
+            other_information=other_information,
+            email_notification=email_notification,
+            post_type=post_type,
+            cat_image=Image(**uploaded_image),
+        )
+        result = await db.database["posts_v2"].insert_one(post_obj.model_dump(by_alias=True))
+
+        if result.inserted_id:
+            # Return Post response
+            return post_obj
+
+        raise HTTPException(status_code=500, detail="Failed to create post")
+
+    except Exception as e:
+        # Delete uploaded image if fail to create post.
+        if uploaded_image:
+            await delete_image_service(uploaded_image["image_id"])
+
+        # debug
+        # error_message = traceback.format_exc()
+        # print("Error Traceback:\n", error_message)
+        raise HTTPException(
+            status_code=500, detail=f"An error occurred: {str(e)}")
+
+
+# Get all posts, filter by post_type
+@post_router.get("/", response_model=List[Post])
+async def list_posts(post_type: Optional[str] = None):
+    """
+    Get all posts, filter by post_type.
+    Return list of Post
+    """
+    query = {}
+    if post_type:
+        query["post_type"] = post_type
+
+    posts = await db.database["posts_v2"].find(query).to_list(length=100)
+
+    if not posts:
+        raise HTTPException(status_code=404, detail="No posts found.")
+
+    return posts
+
+
+@post_router.get("/{post_id}", response_model=Post)
+async def get_post(post_id: str):
+    """
+    Get a post by post_id.
+    """
+    try:
+        post = await db.database["posts_v2"].find_one({"post_id": str(post_id)})
+    except Exception as e:
+        raise HTTPException(
+            status_code=400, detail=f"Invalid post ID: {str(e)}")
+
+    if post:
+        return post
+
+    raise HTTPException(status_code=404, detail="Post not found")
+
+# Get post by user ID
+
+
+@post_router.get("/user/{user_id}", response_model=List[Post])
+async def get_posts_by_user(user_id: str):
+    """
+    Get all posts created by a specific user.
+    """
+    posts = await db.database["posts_v2"].find({"user_id": user_id}).to_list()
+
+    if not posts:
+        raise HTTPException(
+            status_code=404, detail="No posts found for this user")
+
+    return posts
+
+
+# TODO: Check update post
+# Update post by ID
+@post_router.put("/{post_id}", response_model=Post)
+async def update_post(
+    post_id: str,
+    user_id: str = Form(...),
+    cat_name: Optional[str] = Form(None),
+    gender: Optional[str] = Form(None),
+    color: Optional[str] = Form(None),
+    breed: Optional[str] = Form(None),
+    cat_marking: Optional[str] = Form(None),
+    location: Optional[str] = Form(None),
+    lost_date: Optional[str] = Form(None),
+    other_information: Optional[str] = Form(None),
+    email_notification: Optional[bool] = Form(None),
+    post_type: Optional[str] = Form(None),
+    image_id: Optional[str] = Form(None),
+    cat_image: Optional[UploadFile] = File(None),
+):
+    """
+    Updates an existing post.
+    Detects if an image is new or unchanged.
+    Skips update if no changes are detected.
+    """
+    existing_post = await db.database["posts_v2"].find_one({"post_id": post_id})
+    if not existing_post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    updated_fields = {}
+
+    old_image_id = existing_post.get("cat_image", {}).get(
+        "image_id") if existing_post.get("cat_image") else None
+
+    # Handle Location update
+    if location:
+        location_obj = parse_location(location)
+        if location_obj != existing_post["location"]:
+            updated_fields["location"] = location_obj.model_dump()
+
+    # Compare and detect changes
+    fields_to_check = {
         "cat_name": cat_name,
         "gender": gender,
         "color": color,
         "breed": breed,
         "cat_marking": cat_marking,
-        "location": location_data,
-        "lost_date": lost_date,
         "other_information": other_information,
         "email_notification": email_notification,
         "post_type": post_type,
-        "cat_image": {  
-            "image_id": image_id,
-            "image_path": f"{cat_image}"  
-        },
     }
 
-    # Insert into MongoDB
-    result = await db.database["posts"].insert_one(post_dict)
+    for field, value in fields_to_check.items():
+        if value is not None and value != existing_post.get(field):
+            updated_fields[field] = value
 
-    if result.inserted_id:
-        return post_dict 
+    # Convert lost date
+    if lost_date:
+        lost_date_parsed = parse_lost_date(lost_date)
+        if lost_date_parsed != existing_post.get("lost_date"):
+            updated_fields["lost_date"] = lost_date_parsed
 
-    raise HTTPException(status_code=500, detail="Failed to create post")
+    # Handle Image update
+    new_uploaded_image = None
+    if image_id and image_id == old_image_id:
+        print("Using existing image, no change.")
 
-# Get all posts, filter by post_type
-@post_router.get("/", response_model=List[Post])
-async def list_posts(post_type: Optional[str] = None):
-    query = {}
-    if post_type:
-        query["post_type"] = post_type
+    elif cat_image:
+        print("Uploading new cat image")
+        new_uploaded_image = await upload_cat_image(cat_image)
+        updated_fields["cat_image"] = new_uploaded_image
 
-    posts = await db.database["posts"].find(query).to_list(length=100)
+    elif not image_id and not cat_image:
+        updated_fields["cat_image"] = None
 
-    for post in posts:
-        post["_id"] = str(post["_id"])
+    #  No Changes
+    if not updated_fields:
+        return {"message": "No changes detected, post remains the same.", "post_id": post_id}
 
-    return posts
+    # Update post to database
+    await db.database["posts_v2"].update_one(
+        {"post_id": post_id}, {"$set": updated_fields}
+    )
 
-# Get post by ID
-@post_router.get("/{post_id}", response_model=Post)
-async def get_post(post_id: str):
-    try:
-        post = await db.database["posts"].find_one({"post_id": str(post_id)})
-    except:
-        raise HTTPException(
-            status_code=400, detail="Invalid post ID format")  # invalid ID
+    # Delete old image if replaced
+    if new_uploaded_image and old_image_id:
+        await delete_image_service(old_image_id)
 
-    if post:
-        post["_id"] = str(post["_id"])
-        return post
+    #  Return updated post
+    updated_post = await db.database["posts_v2"].find_one({"post_id": post_id})
+    return updated_post
 
-    raise HTTPException(status_code=404, detail="Post not found")
 
-# Update post by ID
-@post_router.put("/{post_id}", response_model=Post)
-async def edit_post(post_id: str, post_data: Post):
-    try:
-        post_object_id = ObjectId(post_id)
-    except:
-        raise HTTPException(status_code=400, detail="Invalid post ID")
-
-    # Convert the update model to a dictionary and remove `None` values
-    update_data = {k: v for k, v in post_data.model_dump().items()
-                   if v is not None}
-
-    if not update_data:
-        raise HTTPException(
-            status_code=400, detail="No data provided to update the post.")
-
-    result = await db.database["posts"].update_one({"_id": post_object_id}, {"$set": update_data})
-
-    if result.modified_count == 1:
-        # Retrieve the updated post
-        updated_post = await db.database["posts"].find_one({"_id": post_object_id})
-        updated_post["_id"] = str(updated_post["_id"])
-        return updated_post
-
-    raise HTTPException(
-        status_code=404, detail="Post not found or no changes made.")
-
-# Delete post by ID
-@post_router.delete("/{post_id}", response_model=dict)
+@post_router.delete("/{post_id}")
 async def delete_post(post_id: str):
+    """
+    Deletes a post by post_id and removes its associated image.
+    """
     try:
-        post_object_id = ObjectId(post_id)
-    except:
-        raise HTTPException(status_code=400, detail="Invalid post ID format")
+        post_data = await db.database["posts_v2"].find_one({"post_id": post_id})
+        if not post_data:
+            raise HTTPException(status_code=404, detail="Post not found")
 
-    result = await db.database["posts"].delete_one({"_id": post_object_id})
-    if result.deleted_count == 1:
-        return {"message": "Post deleted successfully"}
+        image_id = post_data.get("cat_image", {}).get("image_id")
 
-    raise HTTPException(status_code=404, detail="Post not found")
+        # Delete the post from database
+        await db.database["posts_v2"].delete_one({"post_id": post_id})
 
-@post_router.post("/upload_image", response_model=dict)
-async def upload_image(file: UploadFile = File(...)):
-    image_id = str(ObjectId())  # Generate a unique image ID
-    image_filename = file.filename
-    image_path = os.path.join("uploads", image_filename)
+        # Delete the post image
+        if image_id:
+            await delete_image_service(image_id)
 
-    # Ensure the upload directory exists
-    os.makedirs(os.path.dirname(image_path), exist_ok=True)
+        return {"message": "Post deleted successfully", "post_id": post_id}
 
-    # Save the image to the local filesystem
-    with open(image_path, "wb") as image_file:
-        image_file.write(await file.read())  # Save the file content to disk
-
-    # After saving, open the file again to encode it to Base64
-    with open(image_path, "rb") as image_file:
-        file_content = image_file.read()
-        base64_encoded = base64.b64encode(file_content).decode("utf-8")
-
-    # Save the image metadata & Base64 data to MongoDB
-    image_doc = {
-        "_id": image_id,
-        "filename": image_filename,  # Store the original filename
-        "image_data": base64_encoded,  # Store Base64 image data
-    }
-
-    # Save the image document to the database
-    await db.database["images"].insert_one(image_doc)
-
-    return {"image_path": image_path, "filename": image_filename}
-
-
-@post_router.get("/image/{filename}")
-async def get_image_by_filename(filename: str):
-    image = await db.database["images"].find_one({"filename": filename})
-
-    if not image:
-        return JSONResponse(content={"error": "Image not found"}, status_code=404)
-
-    base64_data = image.get("image_data")
-    if base64_data:
-        try:
-            image_bytes = base64.b64decode(base64_data)
-            return Response(content=image_bytes, media_type="image/jpeg")
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error decoding image: {e}")
-
-    return JSONResponse(content={"error": "No image data found"}, status_code=404)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to delete post: {str(e)}")
