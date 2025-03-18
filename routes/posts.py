@@ -7,6 +7,7 @@ from database import db
 from bson import ObjectId
 from typing import List, Optional
 from models.post import Post
+from services.emailService import send_email
 
 
 post_router = APIRouter()
@@ -23,7 +24,8 @@ async def create_post(
     other_information: str = Form(None),
     email_notification: bool = Form(...),
     post_type: str = Form(...),
-    cat_image: str = Form(...) 
+    cat_image: str = Form(...) ,
+    user_email: str = Form(...),
 ):
     post_id = ObjectId()
     image_id = str(ObjectId())  
@@ -46,6 +48,8 @@ async def create_post(
         "other_information": other_information,
         "email_notification": email_notification,
         "post_type": post_type,
+        "user_email": user_email,
+        # "status": status,
         "cat_image": {  
             "image_id": image_id,
             "image_path": f"{cat_image}"  
@@ -56,8 +60,18 @@ async def create_post(
     result = await db.database["posts"].insert_one(post_dict)
 
     if result.inserted_id:
-        return post_dict 
+        if email_notification:
+            subject = "Cat Found Post Notification"
+            body = f"A post about a found cat has been created. \n\nDetails: \nCat Name: {cat_name} \nGender: {gender} \nColor: {color} \nBreed: {breed} \nLocation: {location_data}"
 
+            try:
+                send_email(user_email, subject, body)
+                print("Email notification sent successfully!")
+            except Exception as e:
+                print(f"Failed to send email: {e}")
+
+        return post_dict
+    
     raise HTTPException(status_code=500, detail="Failed to create post")
 
 # Get all posts, filter by post_type
@@ -88,6 +102,23 @@ async def get_post(post_id: str):
         return post
 
     raise HTTPException(status_code=404, detail="Post not found")
+@post_router.get("/user/{user_id}", response_model=List[Post])
+async def get_posts_by_user(user_id: str):
+    try:
+        # Query the database to find posts by the user_id
+        posts = await db.database["posts"].find({"user_id": user_id}).to_list(length=100)  # Adjust the length as needed
+    except Exception as e:
+        raise HTTPException(
+            status_code=400, detail=f"Error fetching posts: {str(e)}"
+        )  # Catch and log the error properly
+
+    if posts:
+        # Optionally, convert MongoDB _id to string if necessary
+        for post in posts:
+            post["_id"] = str(post["_id"])
+        return posts
+
+    raise HTTPException(status_code=404, detail="No posts found for this user")
 
 # Update post by ID
 @post_router.put("/{post_id}", response_model=Post)
