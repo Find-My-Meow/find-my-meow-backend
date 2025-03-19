@@ -9,13 +9,13 @@ from PIL import Image as PILImage
 from models.image import Image
 from services.image_service import upload_to_s3, s3_client
 from utils.cat_detection import crop_cats, detect_cats, extract_cat_features
-from utils.utils import get_next_image_id, load_faiss_index
+from utils.faiss_utils import FAISS_INDEX_FILE, load_faiss_index, reset_faiss_index, upload_faiss_index_to_s3
+from utils.utils import get_next_image_id
 from core.config import settings
 
 
 image_router = APIRouter()
-
-faiss_index, FAISS_INDEX_FILE = load_faiss_index()
+faiss_index = load_faiss_index()
 
 
 @image_router.post("/")
@@ -38,7 +38,7 @@ async def upload_image(file: UploadFile = File(...)):
         if len(detections) == 0:
             raise HTTPException(
                 status_code=400, detail="No cat detected. Please upload an image with a cat.")
-        
+
         # Cropping cat images
         cat_crops = crop_cats(image, detections)
         # Extracting cat features
@@ -71,6 +71,9 @@ async def upload_image(file: UploadFile = File(...)):
         faiss_index.add_with_ids(
             cat_features_np, np.array([faiss_id], dtype=np.int64))
         faiss.write_index(faiss_index, FAISS_INDEX_FILE)
+
+        # Upload FAISS index to S3
+        upload_faiss_index_to_s3()
 
         return {
             "image_id": image_id,
@@ -142,6 +145,8 @@ async def delete_image(image_id: str):
                 if faiss_id[0] in stored_ids:
                     faiss_index.remove_ids(faiss_id)
                     faiss.write_index(faiss_index, FAISS_INDEX_FILE)
+                    # Upload FAISS index to S3 after delete
+                    upload_faiss_index_to_s3()
                 else:
                     print(f"FAISS ID {faiss_id[0]} not found in FAISS index.")
             else:
@@ -158,3 +163,29 @@ async def delete_image(image_id: str):
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to delete image: {str(e)}")
+
+
+# Debug for faiss
+@image_router.get("/faiss/debug")
+async def debug_faiss():
+    """
+    Debug FAISS index stored in S3 by checking stored vectors.
+    """
+    faiss_index = load_faiss_index()
+
+    if not faiss_index or faiss_index.ntotal == 0:
+        return {"message": "FAISS index is empty or not loaded"}
+
+    return {
+        "total_vectors": faiss_index.ntotal,
+        "index_type": str(type(faiss_index)),
+    }
+
+
+@image_router.post("/faiss/reset")
+async def reset_faiss():
+    """
+    Resets the FAISS index and updates it in S3.
+    """
+    reset_faiss_index()
+    return {"message": "FAISS index has been reset!"}

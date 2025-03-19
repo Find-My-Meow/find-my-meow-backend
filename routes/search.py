@@ -3,16 +3,13 @@ from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 import numpy as np
 from core.database import db
 from PIL import Image as PILImage
-
 from utils.cat_detection import crop_cats, detect_cats, extract_cat_features
-from utils.utils import load_faiss_index
-
+from utils.faiss_utils import load_faiss_index
 
 search_router = APIRouter()
 
 # Load FAISS index
-faiss_index, FAISS_INDEX_FILE = load_faiss_index()
-search_router.faiss_index = faiss_index
+search_router.faiss_index = load_faiss_index()
 
 
 @search_router.post("/search", response_model=dict)
@@ -33,6 +30,12 @@ async def search_posts(
         if not file and not any([province, district, sub_district]):
             raise HTTPException(
                 status_code=400, detail="Please provide at least one search parameter (image or location).")
+
+        # Ensure FAISS Index is Loaded
+        faiss_index = search_router.faiss_index
+        if faiss_index is None or faiss_index.ntotal == 0:
+            faiss_index = load_faiss_index()  # Reload FAISS from S3
+            search_router.faiss_index = faiss_index
 
         # database query for location
         query = {}
@@ -71,8 +74,8 @@ async def search_posts(
             if len(cat_features_np.shape) == 1:
                 cat_features_np = np.expand_dims(cat_features_np, axis=0)
 
-            # Search in FAISS
-            if faiss_index.ntotal > 0:
+            # Search in FAISS (if not empty)
+            if faiss_index and faiss_index.ntotal > 0:
                 distances, indices = faiss_index.search(
                     cat_features_np, top_k * 3)
                 matching_image_ids = [str(idx)
@@ -106,7 +109,7 @@ async def search_posts(
         for post in posts:
             post["_id"] = str(post["_id"])
 
-        print(f"✅ Returning {len(posts)} posts")
+        print(f"Returning {len(posts)} posts")
         return {
             "message": message,  # search type
             "posts": posts[:top_k]  # Limit results
