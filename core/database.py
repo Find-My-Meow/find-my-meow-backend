@@ -2,13 +2,10 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from dotenv import load_dotenv
-import os
+from core.config import settings
 
 
 load_dotenv()
-
-DATABASE_URL = os.getenv("DATABASE_URL")
-DATABASE_NAME = os.getenv("DATABASE_NAME")
 
 
 class Database:
@@ -21,8 +18,8 @@ db = Database()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Start the database connection
-    db.client = AsyncIOMotorClient(DATABASE_URL)
-    db.database = db.client[DATABASE_NAME]
+    db.client = AsyncIOMotorClient(settings.DATABASE_URL)
+    db.database = db.client[settings.DATABASE_NAME]
     print("MongoDB connected.")
     yield  # run
     # Close the database connection
