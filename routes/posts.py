@@ -1,7 +1,7 @@
 import traceback
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from core.database import db
-from typing import List, Optional
+from typing import List, Literal, Optional
 from models.image import Image
 from models.post import Post
 from services.image_service import delete_image_service, upload_cat_image
@@ -10,8 +10,6 @@ from utils.utils import get_next_post_id
 
 
 post_router = APIRouter()
-
-# TODO: add post status
 
 
 @post_router.post("/", response_model=Post)
@@ -62,6 +60,7 @@ async def create_post(
             email_notification=email_notification,
             post_type=post_type,
             cat_image=Image(**uploaded_image),
+            status="active",
         )
         result = await db.database["posts_v2"].insert_one(post_obj.model_dump(by_alias=True))
 
@@ -118,9 +117,8 @@ async def get_post(post_id: str):
 
     raise HTTPException(status_code=404, detail="Post not found")
 
+
 # Get post by user ID
-
-
 @post_router.get("/user/{user_id}", response_model=List[Post])
 async def get_posts_by_user(user_id: str):
     """
@@ -151,6 +149,7 @@ async def update_post(
     other_information: Optional[str] = Form(None),
     email_notification: Optional[bool] = Form(None),
     post_type: Optional[str] = Form(None),
+    status: Optional[str] = Form(None),
     image_id: Optional[str] = Form(None),
     cat_image: Optional[UploadFile] = File(None),
 ):
@@ -184,6 +183,7 @@ async def update_post(
         "other_information": other_information,
         "email_notification": email_notification,
         "post_type": post_type,
+        "status": status,
     }
 
     for field, value in fields_to_check.items():
@@ -251,3 +251,26 @@ async def delete_post(post_id: str):
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to delete post: {str(e)}")
+
+
+@post_router.patch("/{post_id}/status", response_model=Post)
+async def update_post_status(
+    post_id: str,
+    status: Literal["active", "close"] = Form(...)
+):
+    """
+    Updates only the status of a post.
+    """
+    existing_post = await db.database["posts_v2"].find_one({"post_id": post_id})
+    if not existing_post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    if existing_post.get("status") == status:
+        return {**existing_post, "message": "No changes detected, status remains the same."}
+
+    await db.database["posts_v2"].update_one(
+        {"post_id": post_id}, {"$set": {"status": status}}
+    )
+
+    updated_post = await db.database["posts_v2"].find_one({"post_id": post_id})
+    return updated_post

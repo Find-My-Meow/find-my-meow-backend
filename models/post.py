@@ -19,3 +19,4 @@ class Post(BaseModel):
     email_notification: bool
     cat_image: Image
     post_type: Literal["lost", "found", "adoption"]
+    status: Literal["active", "close"]
