@@ -26,6 +26,8 @@ async def create_post(
     email_notification: bool = Form(...),
     post_type: Literal["lost", "found", "adoption"] = Form(...),
     cat_image: UploadFile = File(...),
+    user_email: Optional[str] = Form(None),
+
 ):
     """
     Creates a new post with a cat image.
@@ -61,6 +63,7 @@ async def create_post(
             post_type=post_type,
             cat_image=Image(**uploaded_image),
             status="active",
+            user_email= user_email,
         )
         result = await db.database["posts_v2"].insert_one(post_obj.model_dump(by_alias=True))
 
@@ -82,12 +85,11 @@ async def create_post(
             status_code=500, detail=f"An error occurred: {str(e)}")
 
 
-# Get all posts, filter by post_type
 @post_router.get("/", response_model=List[Post])
 async def list_posts(post_type: Optional[str] = None):
     """
     Get all posts, filter by post_type.
-    Return list of Post
+    Return list of Post.
     """
     query = {}
     if post_type:
@@ -98,7 +100,12 @@ async def list_posts(post_type: Optional[str] = None):
     if not posts:
         raise HTTPException(status_code=404, detail="No posts found.")
 
+    for post in posts:
+        if "status" not in post:
+            post["status"] = "active"
+
     return posts
+
 
 
 @post_router.get("/{post_id}", response_model=Post)
@@ -108,14 +115,20 @@ async def get_post(post_id: str):
     """
     try:
         post = await db.database["posts_v2"].find_one({"post_id": str(post_id)})
-    except Exception as e:
-        raise HTTPException(
-            status_code=400, detail=f"Invalid post ID: {str(e)}")
 
-    if post:
+        if not post:
+            raise HTTPException(status_code=404, detail="Post not found")
+
+        if "status" not in post:
+            post["status"] = "active"
+
         return post
 
-    raise HTTPException(status_code=404, detail="Post not found")
+    except Exception as e:
+        raise HTTPException(
+            status_code=400, detail=f"Invalid post ID: {str(e)}"
+        )
+
 
 
 # Get post by user ID
@@ -129,6 +142,9 @@ async def get_posts_by_user(user_id: str):
     if not posts:
         raise HTTPException(
             status_code=404, detail="No posts found for this user")
+    for post in posts:
+        if "status" not in post:
+            post["status"] = "active" 
 
     return posts
 
@@ -152,6 +168,8 @@ async def update_post(
     status: Optional[Literal["active", "close"]] = Form(None),
     image_id: Optional[str] = Form(None),
     cat_image: Optional[UploadFile] = File(None),
+    user_email: Optional[str] = Form(None),
+
 ):
     """
     Updates an existing post.
@@ -184,6 +202,7 @@ async def update_post(
         "email_notification": email_notification,
         "post_type": post_type,
         "status": status,
+        
     }
 
     for field, value in fields_to_check.items():

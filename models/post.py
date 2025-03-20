@@ -20,3 +20,4 @@ class Post(BaseModel):
     cat_image: Image
     post_type: Literal["lost", "found", "adoption"]
     status: Literal["active", "close"]
+    user_email: Optional[str] = None
