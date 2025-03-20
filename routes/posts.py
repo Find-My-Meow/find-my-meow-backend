@@ -16,7 +16,7 @@ post_router = APIRouter()
 async def create_post(
     user_id: str = Form(...),
     cat_name: Optional[str] = Form(None),
-    gender: str = Form(...),
+    gender: Literal["male", "female"] = Form(...),
     color: str = Form(...),
     breed: str = Form(...),
     cat_marking: Optional[str] = Form(None),
@@ -24,7 +24,7 @@ async def create_post(
     lost_date: Optional[str] = Form(None),
     other_information: Optional[str] = Form(None),
     email_notification: bool = Form(...),
-    post_type: str = Form(...),
+    post_type: Literal["lost", "found", "adoption"] = Form(...),
     cat_image: UploadFile = File(...),
 ):
     """
@@ -140,7 +140,7 @@ async def update_post(
     post_id: str,
     user_id: str = Form(...),
     cat_name: Optional[str] = Form(None),
-    gender: Optional[str] = Form(None),
+    gender: Optional[Literal["male", "female"]] = Form(None),
     color: Optional[str] = Form(None),
     breed: Optional[str] = Form(None),
     cat_marking: Optional[str] = Form(None),
@@ -148,8 +148,8 @@ async def update_post(
     lost_date: Optional[str] = Form(None),
     other_information: Optional[str] = Form(None),
     email_notification: Optional[bool] = Form(None),
-    post_type: Optional[str] = Form(None),
-    status: Optional[str] = Form(None),
+    post_type: Optional[Literal["lost", "found", "adoption"]] = Form(None),
+    status: Optional[Literal["active", "close"]] = Form(None),
     image_id: Optional[str] = Form(None),
     cat_image: Optional[UploadFile] = File(None),
 ):
