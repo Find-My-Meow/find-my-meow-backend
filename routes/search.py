@@ -1,5 +1,5 @@
 from typing import Optional
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 import numpy as np
 from core.database import db
 from PIL import Image as PILImage
@@ -15,9 +15,9 @@ search_router.faiss_index = load_faiss_index()
 @search_router.post("/search", response_model=dict)
 async def search_posts(
     file: Optional[UploadFile] = File(None),
-    province: Optional[str] = Query(None),
-    district: Optional[str] = Query(None),
-    sub_district: Optional[str] = Query(None),
+    province: Optional[str] = Form(None),
+    district: Optional[str] = Form(None),
+    sub_district: Optional[str] = Form(None),
     top_k: int = 100
 ):
     """
@@ -27,6 +27,9 @@ async def search_posts(
     - If both image and location are provided, it applies both filters first.
     """
     try:
+        if file and file.filename == "":
+            file = None
+        
         if not file and not any([province, district, sub_district]):
             raise HTTPException(
                 status_code=400, detail="Please provide at least one search parameter (image or location).")
@@ -46,7 +49,7 @@ async def search_posts(
         if sub_district:
             query["location.sub_district"] = sub_district
 
-        # If Image is provided → FAISS Search
+        # If Image is provided do FAISS Search
         matching_image_ids = []
         search_by = "location" if query else None
 
@@ -93,7 +96,7 @@ async def search_posts(
 
         # If No Results Found, Try Image-Only Search
         if not posts and matching_image_ids:
-            # print("No posts found with image & location. Trying image-only search...")
+            # print("No posts found with image & location. Trying image-only search.")
             search_by = "image"
             # Search only by image
             query = {"cat_image.image_id": {"$in": matching_image_ids}}
