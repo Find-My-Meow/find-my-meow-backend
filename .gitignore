@@ -10,3 +10,7 @@ dist/
 htmlcov/
 .tox/
 docs/_build/
+.env
+/node_modules
+/uploads
+/images
