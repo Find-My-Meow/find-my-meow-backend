@@ -7,6 +7,8 @@ from models.post import Post
 from utils.cat_detection import crop_cats, detect_cats, extract_cat_features
 from utils.faiss_utils import load_faiss_index
 from geopy.distance import geodesic
+from utils.image_quality import is_blurry, is_too_small
+
 
 search_router = APIRouter()
 faiss_index = load_faiss_index()
@@ -44,10 +46,22 @@ async def search_posts(
         matched_image_ids: Dict[str, float] = {}
         code = "NO_MATCH"
         message = "No matching posts found."
+        image_is_blurry = False
 
         # Image-based FAISS search
         if file:
             image = PILImage.open(file.file)
+
+            # Resolution check
+            if is_too_small(image):
+                raise HTTPException(
+                    status_code=400,
+                    detail={"message": "Low quality image: Image is too small."}
+                )
+
+            # Blur check
+            image_is_blurry = is_blurry(image, threshold=100.0)
+
             detections = detect_cats(image)
             if len(detections) == 0:
                 raise HTTPException(
@@ -133,7 +147,8 @@ async def search_posts(
             "code": code,
             "message": message,
             "results": enriched_posts,
-            "count": len(enriched_posts)
+            "count": len(enriched_posts),
+            "image_blur_warning": bool(image_is_blurry),
         }
 
     except HTTPException as http_exc:

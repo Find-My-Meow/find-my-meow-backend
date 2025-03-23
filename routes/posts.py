@@ -237,9 +237,8 @@ async def update_post(
     if new_uploaded_image and old_image_id:
         await delete_image_service(old_image_id)
 
-    # Refresh FAISS if new image uploaded
-    if new_uploaded_image:
-        refresh_faiss_index()
+    # Refresh FAISS
+    refresh_faiss_index()
 
     #  Return updated post
     updated_post = await db.database["posts_v2"].find_one({"post_id": post_id})

@@ -10,6 +10,7 @@ from models.image import Image
 from services.image_service import upload_to_s3, s3_client
 from utils.cat_detection import crop_cats, detect_cats, extract_cat_features
 from utils.faiss_utils import FAISS_INDEX_FILE, load_faiss_index, reset_faiss_index, upload_faiss_index_to_s3
+from utils.image_quality import is_blurry, is_too_small
 from utils.utils import get_next_image_id
 from core.config import settings
 
@@ -32,7 +33,6 @@ async def upload_image(file: UploadFile = File(...)):
 
         image = PILImage.open(file.file)
 
-        # TODO: Check image quality
         # Detecting cats
         detections = detect_cats(image)
         if len(detections) == 0:
@@ -86,6 +86,9 @@ async def upload_image(file: UploadFile = File(...)):
             "image_path": image_path,
             "faiss_ids": faiss_ids.tolist()
         }
+
+    except HTTPException as http_exc:
+        raise http_exc
 
     except Exception as e:
         # debug
@@ -194,3 +197,14 @@ async def reset_faiss():
     """
     reset_faiss_index()
     return {"message": "FAISS index has been reset!"}
+
+
+@image_router.post("/check-quality")
+async def check_image_quality(file: UploadFile = File(...)):
+    image = PILImage.open(file.file)
+    issues = []
+    if is_too_small(image):
+        issues.append("resolution")
+    if is_blurry(image, threshold=50.0):
+        issues.append("blurry")
+    return {"issues": issues}
