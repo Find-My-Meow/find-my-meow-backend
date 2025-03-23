@@ -63,7 +63,7 @@ async def create_post(
             post_type=post_type,
             cat_image=Image(**uploaded_image),
             status="active",
-            user_email= user_email,
+            user_email=user_email,
         )
         result = await db.database["posts_v2"].insert_one(post_obj.model_dump(by_alias=True))
 
@@ -86,7 +86,7 @@ async def create_post(
 
 
 @post_router.get("/", response_model=List[Post])
-async def list_posts(post_type: Optional[str] = None):
+async def list_posts(post_type: Optional[str] = None, status: Optional[Literal["active", "close"]] = None):
     """
     Get all posts, filter by post_type.
     Return list of Post.
@@ -94,18 +94,14 @@ async def list_posts(post_type: Optional[str] = None):
     query = {}
     if post_type:
         query["post_type"] = post_type
+    if status:
+        query["status"] = status
 
     posts = await db.database["posts_v2"].find(query).to_list(length=100)
 
     if not posts:
         raise HTTPException(status_code=404, detail="No posts found.")
-
-    for post in posts:
-        if "status" not in post:
-            post["status"] = "active"
-
     return posts
-
 
 
 @post_router.get("/{post_id}", response_model=Post)
@@ -130,7 +126,6 @@ async def get_post(post_id: str):
         )
 
 
-
 # Get post by user ID
 @post_router.get("/user/{user_id}", response_model=List[Post])
 async def get_posts_by_user(user_id: str):
@@ -144,12 +139,11 @@ async def get_posts_by_user(user_id: str):
             status_code=404, detail="No posts found for this user")
     for post in posts:
         if "status" not in post:
-            post["status"] = "active" 
+            post["status"] = "active"
 
     return posts
 
 
-# TODO: Check update post
 # Update post by ID
 @post_router.put("/{post_id}", response_model=Post)
 async def update_post(
@@ -202,7 +196,7 @@ async def update_post(
         "email_notification": email_notification,
         "post_type": post_type,
         "status": status,
-        
+
     }
 
     for field, value in fields_to_check.items():
