@@ -50,7 +50,13 @@ async def upload_image(file: UploadFile = File(...)):
             cat_features_np = np.expand_dims(cat_features_np, axis=0)
 
         image_id = await get_next_image_id()
-        faiss_id = int(image_id)
+
+        num_vectors = cat_features_np.shape[0]
+        # Create FAISS IDs: e.g., 49, 4901, 4902 if image_id is "49"
+        faiss_ids = np.array(
+            [int(f"{image_id}{i:02}") for i in range(num_vectors)],
+            dtype=np.int64
+        )
 
         # Uploading image to S3
         file.file.seek(0)
@@ -62,16 +68,15 @@ async def upload_image(file: UploadFile = File(...)):
             "image_id": image_id,
             "stored_filename": file_name,
             "image_path": image_path,
+            "faiss_ids": faiss_ids.tolist(),  # list of FAISS vector IDs
             "cat_features": Binary(bson.BSON.encode({"features": cat_features_np.tolist()})),
         }
 
         await db.database["images_v2"].insert_one(image_data)
 
         # Add feature vector to FAISS
-        faiss_index.add_with_ids(
-            cat_features_np, np.array([faiss_id], dtype=np.int64))
+        faiss_index.add_with_ids(cat_features_np, faiss_ids)
         faiss.write_index(faiss_index, FAISS_INDEX_FILE)
-
         # Upload FAISS index to S3
         upload_faiss_index_to_s3()
 
@@ -79,7 +84,7 @@ async def upload_image(file: UploadFile = File(...)):
             "image_id": image_id,
             "stored_filename": file_name,
             "image_path": image_path,
-            "faiss_id": faiss_id
+            "faiss_ids": faiss_ids.tolist()
         }
 
     except Exception as e:
