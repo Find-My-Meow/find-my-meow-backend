@@ -4,6 +4,7 @@ from core.database import db
 from typing import List, Literal, Optional
 from models.image import Image
 from models.post import Post
+from routes.search import refresh_faiss_index
 from services.image_service import delete_image_service, upload_cat_image
 from services.post_service import parse_location, parse_lost_date
 from utils.utils import get_next_post_id
@@ -69,6 +70,7 @@ async def create_post(
 
         if result.inserted_id:
             # Return Post response
+            refresh_faiss_index()
             return post_obj
 
         raise HTTPException(status_code=500, detail="Failed to create post")
@@ -235,6 +237,10 @@ async def update_post(
     if new_uploaded_image and old_image_id:
         await delete_image_service(old_image_id)
 
+    # Refresh FAISS if new image uploaded
+    if new_uploaded_image:
+        refresh_faiss_index()
+
     #  Return updated post
     updated_post = await db.database["posts_v2"].find_one({"post_id": post_id})
     return updated_post
@@ -258,6 +264,9 @@ async def delete_post(post_id: str):
         # Delete the post image
         if image_id:
             await delete_image_service(image_id)
+
+        # Refresh FAISS after deletion
+        refresh_faiss_index()
 
         return {"message": "Post deleted successfully", "post_id": post_id}
 
