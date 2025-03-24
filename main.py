@@ -7,6 +7,9 @@ from routes.image import image_router
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,11 +18,12 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
+# Routers
 app.include_router(post_router, prefix="/api/v1/posts", tags=["Posts"])
 app.include_router(image_router, prefix="/api/v1/image", tags=["Image"])
 app.include_router(search_router, prefix="/api/v1/search", tags=["Search"])
 
-
 @app.get("/")
 async def root():
     return {"message": "Welcome to FindMyMeow API"}
+

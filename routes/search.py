@@ -7,7 +7,7 @@ from models.post import Post
 from utils.cat_detection import crop_cats, detect_cats, extract_cat_features
 from utils.faiss_utils import load_faiss_index
 from geopy.distance import geodesic
-from utils.image_quality import is_blurry, is_too_small
+from utils.image_utils import is_blurry, is_too_small
 
 
 search_router = APIRouter()
@@ -50,7 +50,7 @@ async def search_posts(
 
         # Image-based FAISS search
         if file:
-            image = PILImage.open(file.file)
+            image = PILImage.open(file.file).convert("RGB")
 
             # Resolution check
             if is_too_small(image):
