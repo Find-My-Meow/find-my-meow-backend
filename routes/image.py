@@ -9,7 +9,7 @@ from PIL import Image as PILImage
 from models.image import Image
 from services.image_service import upload_to_s3, s3_client
 from utils.cat_detection import crop_cats, detect_cats, extract_cat_features
-from utils.faiss_utils import FAISS_INDEX_FILE, load_faiss_index, reset_faiss_index, upload_faiss_index_to_s3
+from utils.faiss_utils import FAISS_INDEX_FILE, get_all_faiss_ids, load_faiss_index, reset_faiss_index, upload_faiss_index_to_s3
 from utils.image_quality import is_blurry, is_too_small
 from utils.utils import get_next_image_id
 from core.config import settings
@@ -144,21 +144,21 @@ async def delete_image(image_id: str):
 
         # Remove from FAISS
         try:
-            faiss_id = np.array([int(image_id)], dtype=np.int64)
+            image_prefix = str(image_id)
+            all_ids = get_all_faiss_ids(faiss_index)
 
-            if faiss_index is not None and faiss_index.ntotal > 0:
-                stored_ids = np.array([faiss_index.id_map.at(i) for i in range(
-                    faiss_index.id_map.size())], dtype=np.int64)
+            # Find all FAISS IDs that start with the image_id
+            matching_ids = [id_ for id_ in all_ids if str(
+                id_).startswith(image_prefix)]
 
-                if faiss_id[0] in stored_ids:
-                    faiss_index.remove_ids(faiss_id)
-                    faiss.write_index(faiss_index, FAISS_INDEX_FILE)
-                    # Upload FAISS index to S3 after delete
-                    upload_faiss_index_to_s3()
-                else:
-                    print(f"FAISS ID {faiss_id[0]} not found in FAISS index.")
+            if matching_ids:
+                print(f"🧹 Removing FAISS IDs: {matching_ids}")
+                faiss_index.remove_ids(np.array(matching_ids, dtype=np.int64))
+                faiss.write_index(faiss_index, FAISS_INDEX_FILE)
+                upload_faiss_index_to_s3()
             else:
-                print("FAISS index is empty. Skipping FAISS deletion.")
+                print(
+                    f"No FAISS vectors found for image_id prefix: {image_id}")
 
         except Exception as faiss_error:
             raise HTTPException(
