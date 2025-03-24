@@ -29,13 +29,23 @@ async def upload_cat_image(cat_image: UploadFile) -> dict:
                               cat_image.file, cat_image.content_type)}
             response = await client.post(f"{settings.BACKEND_URL}/api/v1/image/", files=files)
 
-        if response.status_code != 200:
-            raise HTTPException(
-                status_code=500, detail="Failed to upload image")
+            if response.status_code != 200:
+                try:
+                    error_detail = response.json().get("detail", "Image upload failed")
+                except Exception:
+                    error_detail = response.text or "Image upload failed"
+
+                print(
+                    f"[DEBUG] Image upload failed with status {response.status_code}: {error_detail}")
+                raise HTTPException(
+                    status_code=response.status_code, detail=error_detail)
 
         return response.json()
 
+    except HTTPException:
+        raise
     except Exception as e:
+        print("[DEBUG] Upload error:", response.status_code, response.text)
         raise HTTPException(status_code=500, detail="Image upload error")
 
 

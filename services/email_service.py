@@ -84,8 +84,6 @@ async def send_daily_email_notifications():
                   <li><strong>เพศ:</strong> {post.get('gender', '-')}</li>
                   <li><strong>สี:</strong> {post.get('color', '-')}</li>
                   <li><strong>สายพันธุ์:</strong> {post.get('breed', '-')}</li>
-                  <li><strong>สถานที่:</strong> แขวง{post['location'].get('sub_district', '')}, 
-                      เขต{post['location'].get('district', '')}, จังหวัด{post['location'].get('province', '')}</li>
                 </ul>
                 <p>ขอบคุณที่ใช้ <strong>FindMyMeow</strong> ❤️</p>
               </body>
@@ -94,7 +92,7 @@ async def send_daily_email_notifications():
 
             user_email = post.get("user_email")
             if user_email:
-                send_email('kulisara2908@gmail.com', subject, body_plain, body_html)
+                send_email(user_email, subject, body_plain, body_html)
             else:
                 print("⚠️ Missing user_email for post:", post.get("post_id", "unknown"))
 
