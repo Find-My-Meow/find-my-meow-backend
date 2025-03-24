@@ -7,7 +7,9 @@ from core.database import db
 from pathlib import Path
 from datetime import datetime
 from pytz import timezone
-
+from datetime import datetime
+from pytz import timezone
+import asyncio
 # Load environment
 env_path = Path(__file__).parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
@@ -17,9 +19,6 @@ SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS")
 EMAIL_APP_PASSWORD = os.getenv("EMAIL_APP_PASSWORD")
-
-print("EMAIL_ADDRESS from env:", EMAIL_ADDRESS)
-
 
 def send_email(recipient_email, subject, body_plain, body_html=None):
     """
@@ -100,3 +99,25 @@ async def send_daily_email_notifications():
             print(f"❌ Failed to send email for post {post.get('post_id', 'unknown')}: {e}")
 
     print("✅ Finished sending notifications:", datetime.now(timezone("Asia/Bangkok")).strftime("%Y-%m-%d %H:%M:%S"))
+
+
+async def run_email_every_5_minutes(send_function):
+    tz = timezone("Asia/Bangkok")
+
+    while True:
+        now = datetime.now(tz)
+
+        # Print the current time for debugging
+        print(f"Current time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+
+        # Check if it's exactly 11:00 AM 
+        if now.hour == 11 and now.minute == 0:
+            print(f"✅ Sending email at {now.strftime('%H:%M:%S')}")
+            await send_function()
+            print(f"✅ Email sent, waiting for the next day at 10:00 PM...")
+            await asyncio.sleep(24 * 60 * 60)  # Wait for 24 hours (1 day) before sending again
+        else:
+            # Wait for 60 min before checking again
+            await asyncio.sleep(60 * 60)
+
+
