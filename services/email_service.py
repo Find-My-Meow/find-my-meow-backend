@@ -55,8 +55,9 @@ async def send_daily_email_notifications():
     print("⏰ Running email notification job...")
 
     posts_to_notify = await db.database["posts_v2"].find(
-        {"email_notification": True}
+    {"email_notification": True, "post_type": {"$in": ["lost", "found"]}}
     ).to_list(length=100)
+
 
     print(f"📬 Found {len(posts_to_notify)} posts to notify.")
 
