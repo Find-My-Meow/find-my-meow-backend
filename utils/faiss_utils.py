@@ -1,3 +1,4 @@
+import numpy as np
 import os
 import faiss
 from core.config import settings
@@ -72,3 +73,9 @@ def reset_faiss_index():
     faiss_index = load_faiss_index()
 
     print("FAISS index has been fully reset and reloaded from S3.")
+
+
+def get_all_faiss_ids(faiss_index):
+    if faiss_index is None or faiss_index.ntotal == 0:
+        return np.array([], dtype=np.int64)
+    return np.array([faiss_index.id_map.at(i) for i in range(faiss_index.id_map.size())], dtype=np.int64)
