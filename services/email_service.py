@@ -10,6 +10,7 @@ from pytz import timezone
 from datetime import datetime
 from pytz import timezone
 import asyncio
+from utils.search_utils import find_similar_posts_by_post_id
 # Load environment
 env_path = Path(__file__).parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
@@ -53,46 +54,73 @@ def send_email(recipient_email, subject, body_plain, body_html=None):
 
 async def send_daily_email_notifications():
     print("⏰ Running email notification job...")
-
     posts_to_notify = await db.database["posts_v2"].find(
-    {"email_notification": True, "post_type": {"$in": ["lost", "found"]}}
+        {"email_notification": True}
     ).to_list(length=100)
-
-
-    print(f"📬 Found {len(posts_to_notify)} posts to notify.")
-
     for post in posts_to_notify:
         try:
-            subject = "แจ้งเตือน: พบแมวที่คุณอาจกำลังตามหา"
-            body_plain = (
-                f"มีโพสต์ใหม่เกี่ยวกับแมวที่คุณกำลังตามหา:\n\n"
-                f"ชื่อแมว: {post.get('cat_name', '-')}\n"
-                f"เพศ: {post.get('gender', '-')}\n"
-                f"สี: {post.get('color', '-')}\n"
-                f"สายพันธุ์: {post.get('breed', '-')}\n"
-                f"สถานที่: แขวง{post['location'].get('sub_district', '')} "
-                f"เขต{post['location'].get('district', '')} จังหวัด{post['location'].get('province', '')}\n\n"
-                f"ขอบคุณที่ใช้ FindMyMeow ❤️"
-            )
+            # Find similar posts for each post
+            similar_posts, _ = await find_similar_posts_by_post_id(post["post_id"], radius_km=20)
+            if similar_posts:
+                # If similar posts are found, create a list of links to each post
+                subject = "แจ้งเตือน: มีโพสต์ใหม่เกี่ยวกับแมวของคุณ"
+                
+                # Prepare plain text email body
+                similar_posts_links = "\n".join(
+                    [f"- {similar_post['cat_name'] if similar_post['cat_name'] else f'โพสต์ {index + 1}'} : http://localhost:5173/cat-detail/{similar_post['post_id']}"
+                     for index, similar_post in enumerate(similar_posts)]
+                )
+                body_plain = (
+                    f"มีโพสต์ใหม่เกี่ยวกับแมวของคุณ:\n\n"
+                    f"โพสต์ที่คล้ายกัน:\n"
+                    f"{similar_posts_links}\n\n"
+                    f"หากคุณยังไม่พบแมวของคุณ, คุณสามารถลองค้นหาเพิ่มเติมได้ที่ "
+                    f"FindMyMeow: http://localhost:5173/cat-detail/{post['post_id']}"
+                )
 
-            body_html = f"""
-            <html>
-              <body style="font-family:sans-serif; color:#333;">
-                <h2>🐾 มีโพสต์ใหม่เกี่ยวกับแมวที่คุณกำลังตามหา:</h2>
-                <ul>
-                  <li><strong>ชื่อแมว:</strong> {post.get('cat_name', '-')}</li>
-                  <li><strong>เพศ:</strong> {post.get('gender', '-')}</li>
-                  <li><strong>สี:</strong> {post.get('color', '-')}</li>
-                  <li><strong>สายพันธุ์:</strong> {post.get('breed', '-')}</li>
-                </ul>
-                <p>ขอบคุณที่ใช้ <strong>FindMyMeow</strong> ❤️</p>
-              </body>
-            </html>
-            """
+                # Prepare HTML email body
+                similar_posts_html = "".join(
+                    [f'<p><a href="http://localhost:5173/cat-detail/{similar_post["post_id"]}">โพสต์ {index + 1}</a></p>'
+                        for index, similar_post in enumerate(similar_posts)])
+
+                body_html = f"""
+                <html>
+                  <body style="font-family:sans-serif; color:#333;">
+                    <h2>🐾 มีโพสต์ใหม่เกี่ยวกับแมวของคุณ:</h2>
+                    <p>โพสต์ที่คล้ายกัน:</p>
+                    {similar_posts_html}
+                    <p>หากคุณยังไม่พบแมวที่คุณกำลังตามหา, คุณสามารถลองค้นหาเพิ่มเติมได้ที่
+                    <a href="http://localhost:5173/cat-detail/{post['post_id']}">FindMyMeow</a></p>
+                  </body>
+                </html>
+                """
+
+            else:
+                print(f"⚠️ No similar posts found for post {post.get('post_id', 'unknown')}")
+                
+                # If no similar posts are found, suggest the general search URL
+                subject = "แจ้งเตือน: ยังไม่พบโพสต์ที่คล้ายกับแมวของคุณ"
+                body_plain = (
+                    f"ขอโทษค่ะ, ยังไม่พบโพสต์ที่คล้ายกับแมวของคุณ:\n\n"
+                    f"หากคุณยังไม่พบแมวที่คุณกำลังตามหา, คุณสามารถลองค้นหาเพิ่มเติมได้ที่ "
+                    f"FindMyMeow: http://localhost:5173/search-cat\n\n"
+                )
+
+                body_html = f"""
+               <html>
+                <body style="font-family:sans-serif; color:#333;">
+                    <h2>🐾 ขอโทษค่ะ, ยังไม่พบโพสต์ที่คล้ายกับแมวของคุณ:</h2>
+                     <p>หากคุณยังไม่พบแมวที่คุณกำลังตามหา, คุณสามารถลองค้นหาเพิ่มเติมได้ที่
+                     <a href="http://localhost:5173/search-cat">FindMyMeow</a></p>
+                    </body>
+                </html>
+                """
 
             user_email = post.get("user_email")
+            loop = asyncio.get_running_loop()
             if user_email:
-                send_email(user_email, subject, body_plain, body_html)
+                await loop.run_in_executor(None, send_email, user_email, subject, body_plain, body_html)
+
             else:
                 print("⚠️ Missing user_email for post:", post.get("post_id", "unknown"))
 
@@ -101,8 +129,7 @@ async def send_daily_email_notifications():
 
     print("✅ Finished sending notifications:", datetime.now(timezone("Asia/Bangkok")).strftime("%Y-%m-%d %H:%M:%S"))
 
-
-async def run_email_every_5_minutes(send_function):
+async def run_email_every_11_AM(send_function):
     tz = timezone("Asia/Bangkok")
 
     while True:

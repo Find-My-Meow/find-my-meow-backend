@@ -14,7 +14,7 @@ class Database:
 
 
 db = Database()
-from services.email_service import run_email_every_5_minutes, send_daily_email_notifications
+from services.email_service import run_email_every_11_AM, send_daily_email_notifications
 
 
 @asynccontextmanager
@@ -23,7 +23,7 @@ async def lifespan(app: FastAPI):
     db.client = AsyncIOMotorClient(settings.DATABASE_URL)
     db.database = db.client[settings.DATABASE_NAME]
     print("MongoDB connected.")
-    asyncio.create_task(run_email_every_5_minutes(send_daily_email_notifications))
+    asyncio.create_task(run_email_every_11_AM(send_daily_email_notifications))
     print("create notification")
     yield  # run
     # Close the database connection
