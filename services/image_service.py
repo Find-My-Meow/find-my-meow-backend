@@ -10,7 +10,7 @@ def upload_to_s3(file, file_ext):
     """
     Uploads an image to S3 and returns the image URL.
     """
-    file_name = f"findmymeow_{uuid.uuid4()}.{file_ext}"
+    file_name = f"cat_images/findmymeow_{uuid.uuid4()}.{file_ext}"
 
     file.seek(0)
     s3_client.upload_fileobj(file, settings.AWS_S3_BUCKET_NAME, file_name)
@@ -45,7 +45,7 @@ async def upload_cat_image(cat_image: UploadFile) -> dict:
     except HTTPException:
         raise
     except Exception as e:
-        print("[DEBUG] Upload error:", response.status_code, response.text)
+        print("[DEBUG] Upload error:", str(e))
         raise HTTPException(status_code=500, detail="Image upload error")
 
 
