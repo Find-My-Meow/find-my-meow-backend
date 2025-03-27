@@ -139,7 +139,7 @@ async def run_email_every_11_AM(send_function):
         print(f"Current time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
 
         # Check if it's exactly 11:00 AM 
-        if now.hour == 11 and now.minute == 0:
+        if now.hour == 11:
             print(f"✅ Sending email at {now.strftime('%H:%M:%S')}")
             await send_function()
             print(f"✅ Email sent, waiting for the next day at 10:00 PM...")
