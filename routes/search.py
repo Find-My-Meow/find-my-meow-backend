@@ -8,6 +8,7 @@ from utils.cat_detection import crop_cats, detect_cats, extract_cat_features
 from utils.faiss_utils import load_faiss_index
 from geopy.distance import geodesic
 from utils.image_utils import is_blurry, is_too_small
+from utils.search_utils import find_similar_posts_by_post_id
 
 
 search_router = APIRouter()
@@ -26,7 +27,9 @@ async def search_posts(
     longitude: Optional[float] = Form(None),
     radius_km: int = Form(1),
     top_k: int = Form(100),
-    similarity_threshold: float = Form(200.0)
+    # For CLIP, raw IP score (0–1), e.g. 0.2
+    # IndexFlatIP (for CLIP), which returns cosine similarity values in the range [0, 1]
+    similarity_threshold: float = Form(0.75)
 ):
     """
     Searches for posts based on an uploaded cat image, location, or both.
@@ -66,28 +69,47 @@ async def search_posts(
             if len(detections) == 0:
                 raise HTTPException(
                     status_code=400, detail="No cat detected in image.")
-
+            # crop cat in query image
             cat_crops = crop_cats(image, detections)
+            # Extracting cat features
             cat_features = extract_cat_features(cat_crops)
-            features_np = np.array(cat_features, dtype=np.float32).squeeze()
-            if len(features_np.shape) == 1:
-                features_np = np.expand_dims(features_np, axis=0)
+            cat_features_np = np.array(cat_features, dtype=np.float32)
+            # Normalize each vector for cosine similarity
+            cat_features_np = cat_features_np / \
+                np.linalg.norm(cat_features_np, axis=1, keepdims=True)
 
-            distances, faiss_ids = faiss_index.search(features_np, top_k)
-            for i, faiss_id_list in enumerate(faiss_ids):
-                for j, faiss_id in enumerate(faiss_id_list):
+            # debug
+            print("Search vector norm:", np.linalg.norm(cat_features_np[0]))
+            print("Current FAISS index total vectors:", faiss_index.ntotal)
+
+            distances, faiss_ids = faiss_index.search(cat_features_np, top_k)
+            print("\n🔎 FAISS Search Results:")
+            # Each cat crop (multiple cats in one image)
+            for i in range(cat_features_np.shape[0]):
+                print(f"  Crop {i+1}/{cat_features_np.shape[0]}")
+                # loop each FAISS match for this crop
+                for j, faiss_id in enumerate(faiss_ids[i]):
+                    # return -1: missing results -> skip
                     if faiss_id == -1:
                         continue
-                    # Euclidean distance: Lower is better
+                    # cosine similarity: 0-1 (1 = perfect match)
                     distance = float(distances[i][j])
-                    if distance > similarity_threshold:
-                        continue
-
+                    # get image id from faiss id: faiss_id = 6400 -> image_id = 64
                     image_id = str(faiss_id // 100)
                     print(
-                        f"[DEBUG] Matched FAISS ID: {faiss_id}, base image_id: {image_id}, distance: {distance}")
-                    if image_id not in matched_image_ids or distance < matched_image_ids[image_id]:
+                        f"FAISS ID: {faiss_id}, Mapped image_id: {image_id}, Distance: {distance:.4f}")
+
+                    if distance < similarity_threshold:
+                        print("      ✖️ Skipped (below threshold)")
+                        continue
+
+                    # Store only best match per image_id
+                    # Add new image id / replace existing distance if current vector is more similar
+                    if image_id not in matched_image_ids or distance > matched_image_ids[image_id]:
                         matched_image_ids[image_id] = distance
+                        print("      ✅ Added/Updated in matched_image_ids")
+                    else:
+                        print("      🔁 Already matched with better distance")
 
         # Primary query — filter by status and image_ids if provided
         query = {"status": "active"}
@@ -97,7 +119,7 @@ async def search_posts(
         posts_cursor = db.database["posts_v2"].find(query)
         all_posts = [Post(**post) async for post in posts_cursor]
 
-        # Location filtering
+        # Location filtering based on geographic distance
         filtered_posts = []
         if latitude is not None and longitude is not None:
             search_coords = (latitude, longitude)
@@ -105,7 +127,9 @@ async def search_posts(
                 if post.location and hasattr(post.location, "latitude") and hasattr(post.location, "longitude"):
                     post_coords = (post.location.latitude,
                                    post.location.longitude)
+                    # calculate geodesic (real-world) distance in km between the post and the search location
                     distance_km = geodesic(post_coords, search_coords).km
+                    # filter only post within the radius
                     if distance_km <= radius_km:
                         filtered_posts.append(post)
         else:
@@ -130,18 +154,13 @@ async def search_posts(
             image_id = post.cat_image.image_id
             similarity = matched_image_ids.get(image_id)
             if similarity is not None:
-                # Convert FAISS L2 distance to similarity score (0–100%)
-                max_possible_distance = 200.0  # adjust based on model scale
-                similarity_score = max(
-                    0.0, 1.0 - (similarity / max_possible_distance))
-                post_data["faiss_distance"] = similarity
-                post_data["similarity_percent"] = round(
-                    similarity_score * 100, 1)  # e.g. 87.5%
+                post_data["faiss_similarity"] = round(similarity, 4)
+                post_data["similarity_percent"] = round(similarity * 100, 1)
             enriched_posts.append(post_data)
 
         if matched_image_ids:
             enriched_posts.sort(key=lambda x: x.get(
-                "similarity_percent", 0), reverse=True)
+                "faiss_similarity", 0), reverse=True)
 
         return {
             "code": code,
@@ -156,3 +175,10 @@ async def search_posts(
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"An error occurred: {str(e)}")
+
+
+# for test find_similar_posts_by_post_id(post_id)
+@search_router.get("/match/{post_id}")
+async def match_similar(post_id: str):
+    results, _ = await find_similar_posts_by_post_id(post_id)
+    return {"count": len(results), "results": results}

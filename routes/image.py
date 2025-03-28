@@ -43,9 +43,12 @@ async def upload_image(file: UploadFile = File(...)):
         cat_crops = crop_cats(image, detections)
         # Extracting cat features
         cat_features = extract_cat_features(cat_crops)
+        cat_features_np = np.array(cat_features, dtype=np.float32)
+        # Normalize each vector for cosine similarity
+        cat_features_np = cat_features_np / \
+            np.linalg.norm(cat_features_np, axis=1, keepdims=True)
 
-        # Converting features to NumPy array
-        cat_features_np = np.array(cat_features, dtype=np.float32).squeeze()
+        # ensures cat_features_np always has 2 dimensions — shape (N, D)
         if len(cat_features_np.shape) == 1:
             cat_features_np = np.expand_dims(cat_features_np, axis=0)
 
@@ -95,8 +98,8 @@ async def upload_image(file: UploadFile = File(...)):
 
     except Exception as e:
         # debug
-        # error_message = traceback.format_exc()
-        # print("Error Traceback:\n", error_message)
+        error_message = traceback.format_exc()
+        print("Error Traceback:\n", error_message)
         raise HTTPException(
             status_code=500, detail=f"An error occurred: {str(e)}")
 
@@ -117,7 +120,8 @@ async def get_image(image_id: str):
         return Image(
             image_id=image_data["image_id"],
             stored_filename=image_data["stored_filename"],
-            image_path=image_data["image_path"]
+            image_path=image_data["image_path"],
+            faiss_ids=image_data.get("faiss_ids", [])
         )
 
     except Exception as e:

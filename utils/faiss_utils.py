@@ -5,8 +5,8 @@ from core.config import settings
 from core.aws import s3_client
 
 
-FAISS_INDEX_FILE = "faiss_cat_index.index"
-D = 768  # Feature vector dimension
+FAISS_INDEX_FILE = "faiss_cat_index_clip.index"
+D = 512  # CLIP model output size
 S3_BUCKET = settings.AWS_S3_BUCKET_NAME
 S3_INDEX_KEY = "faiss_indexes/" + FAISS_INDEX_FILE
 
@@ -52,7 +52,8 @@ def load_faiss_index():
             faiss_index = faiss.IndexIDMap(faiss_index)
     else:
         # Create new FAISS index
-        faiss_index = faiss.IndexIDMap(faiss.IndexFlatL2(D))
+        # Using cosine similarity index (CLIP requires normalized vectors)
+        faiss_index = faiss.IndexIDMap(faiss.IndexFlatIP(D))
 
     return faiss_index
 
@@ -64,7 +65,8 @@ def reset_faiss_index():
     global faiss_index
 
     # Create a new empty FAISS index
-    faiss_index = faiss.IndexIDMap(faiss.IndexFlatL2(D))
+    faiss_index = faiss.IndexIDMap(faiss.IndexFlatIP(D))
+
     # Save the empty index locally
     faiss.write_index(faiss_index, FAISS_INDEX_FILE)
     # Upload the empty index to S3
