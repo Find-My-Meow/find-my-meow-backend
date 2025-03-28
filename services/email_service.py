@@ -20,6 +20,7 @@ SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS")
 EMAIL_APP_PASSWORD = os.getenv("EMAIL_APP_PASSWORD")
+FRONTEND_URL = os.getenv("FRONTEND_URL")
 
 def send_email(recipient_email, subject, body_plain, body_html=None):
     """
@@ -67,7 +68,7 @@ async def send_daily_email_notifications():
                 
                 # Prepare plain text email body
                 similar_posts_links = "\n".join(
-                    [f"- {similar_post['cat_name'] if similar_post['cat_name'] else f'โพสต์ {index + 1}'} : http://localhost:5173/cat-detail/{similar_post['post_id']}"
+                    [f"- {similar_post['cat_name'] if similar_post['cat_name'] else f'โพสต์ {index + 1}'} : {FRONTEND_URL}/cat-detail/{similar_post['post_id']}"
                      for index, similar_post in enumerate(similar_posts)]
                 )
                 body_plain = (
@@ -75,12 +76,12 @@ async def send_daily_email_notifications():
                     f"โพสต์ที่คล้ายกัน:\n"
                     f"{similar_posts_links}\n\n"
                     f"หากคุณยังไม่พบแมวของคุณ, คุณสามารถลองค้นหาเพิ่มเติมได้ที่ "
-                    f"FindMyMeow: http://localhost:5173/cat-detail/{post['post_id']}"
+                    f"FindMyMeow: {FRONTEND_URL}/cat-detail/{post['post_id']}"
                 )
 
                 # Prepare HTML email body
                 similar_posts_html = "".join(
-                    [f'<p><a href="http://localhost:5173/cat-detail/{similar_post["post_id"]}">โพสต์ {index + 1}</a></p>'
+                    [f'<p><a href="{FRONTEND_URL}/cat-detail/{similar_post["post_id"]}">โพสต์ {index + 1}</a></p>'
                         for index, similar_post in enumerate(similar_posts)])
 
                 body_html = f"""
@@ -90,7 +91,7 @@ async def send_daily_email_notifications():
                     <p>โพสต์ที่คล้ายกัน:</p>
                     {similar_posts_html}
                     <p>หากคุณยังไม่พบแมวที่คุณกำลังตามหา, คุณสามารถลองค้นหาเพิ่มเติมได้ที่
-                    <a href="http://localhost:5173/cat-detail/{post['post_id']}">FindMyMeow</a></p>
+                    <a href="{FRONTEND_URL}/cat-detail/{post['post_id']}">FindMyMeow</a></p>
                   </body>
                 </html>
                 """
@@ -103,7 +104,7 @@ async def send_daily_email_notifications():
                 body_plain = (
                     f"ขอโทษค่ะ, ยังไม่พบโพสต์ที่คล้ายกับแมวของคุณ:\n\n"
                     f"หากคุณยังไม่พบแมวที่คุณกำลังตามหา, คุณสามารถลองค้นหาเพิ่มเติมได้ที่ "
-                    f"FindMyMeow: http://localhost:5173/search-cat\n\n"
+                    f"FindMyMeow: {FRONTEND_URL}/search-cat\n\n"
                 )
 
                 body_html = f"""
@@ -111,7 +112,7 @@ async def send_daily_email_notifications():
                 <body style="font-family:sans-serif; color:#333;">
                     <h2>🐾 ขอโทษค่ะ, ยังไม่พบโพสต์ที่คล้ายกับแมวของคุณ:</h2>
                      <p>หากคุณยังไม่พบแมวที่คุณกำลังตามหา, คุณสามารถลองค้นหาเพิ่มเติมได้ที่
-                     <a href="http://localhost:5173/search-cat">FindMyMeow</a></p>
+                     <a href="{FRONTEND_URL}/search-cat">FindMyMeow</a></p>
                     </body>
                 </html>
                 """
