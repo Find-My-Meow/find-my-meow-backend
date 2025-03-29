@@ -38,7 +38,7 @@ def detect_cats(image):
     return detections
 
 
-def crop_cats(image, detections, padding=10):
+def crop_cats(image, detections, padding=15):
     """
     Crops detected cats and returns sorted PIL images (largest to smallest).
     Sorting helps maintain consistency across indexing and search.

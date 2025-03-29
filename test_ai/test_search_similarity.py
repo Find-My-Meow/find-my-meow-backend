@@ -1,6 +1,7 @@
-from utils.image_utils import is_too_small
 from utils.cat_detection import detect_cats, crop_cats, extract_cat_features
-from PIL import Image, ImageDraw, ImageFont
+from utils.image_utils import is_too_small
+from test_ai.plot_results import compute_mrr, plot_accuracy_over_k, plot_rank_histogram, plot_similarity_distribution, save_visual_result
+from PIL import Image
 import numpy as np
 import faiss
 import sys
@@ -11,72 +12,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 FAISS_INDEX_PATH = "faiss_test.index"
 TEST_LABELS_PATH = "test_ai/test_labels.json"
-TOP_K = 5
-
-
-def save_visual_result(query_path, topk_ids, save_dir, faiss_ids, distances):
-    # Create subfolder based on folder name of query image
-    query_folder = os.path.basename(os.path.dirname(query_path))
-    folder_dir = os.path.join(save_dir, query_folder)
-    os.makedirs(folder_dir, exist_ok=True)
-
-    query_img = Image.open(query_path).resize((224, 224))
-
-    top_images = []
-    sim_scores = []
-
-    for fid, dist in zip(faiss_ids, distances):
-        post_id = str(fid // 100)
-        image_path = f"test_data/{post_id}/post.jpg"
-        if os.path.exists(image_path):
-            img = Image.open(image_path).resize((224, 224))
-            top_images.append(img)
-            sim_scores.append(dist)
-        else:
-            top_images.append(
-                Image.new("RGB", (224, 224), color=(200, 200, 200)))
-            sim_scores.append(None)
-
-    total_width = 224 * (1 + len(top_images))
-    result_img = Image.new("RGB", (total_width, 240), color=(255, 255, 255))
-    result_img.paste(query_img, (0, 0))
-
-    font = ImageFont.load_default()
-
-    for i, (img, sim) in enumerate(zip(top_images, sim_scores)):
-        x = 224 * (i + 1)
-        result_img.paste(img, (x, 0))
-        draw = ImageDraw.Draw(result_img)
-        if sim is not None:
-            draw.text((x + 5, 224), f"{sim:.2f}", fill="black", font=font)
-
-    query_name = os.path.basename(query_path).replace(".jpg", "")
-    out_path = os.path.join(folder_dir, f"{query_name}_result.jpg")
-    result_img.save(out_path)
-
-
-def plot_test_summary(top1, topk, recallk, total, k=TOP_K):
-    scores = [
-        top1 / total * 100,
-        topk / total * 100,
-        recallk / total * 100,
-    ]
-    labels = [f"Top-1 Accuracy", f"Top-{k} Accuracy", f"Recall@{k}"]
-
-    plt.figure(figsize=(8, 6))
-    bars = plt.bar(labels, scores, color=["#4CAF50", "#2196F3", "#FFC107"])
-    plt.ylim(0, 100)
-    plt.ylabel("Percentage (%)")
-    plt.title("Image Similarity Search Test Summary")
-
-    for bar, score in zip(bars, scores):
-        plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() +
-                 2, f"{score:.2f}%", ha="center", fontsize=12)
-
-    os.makedirs("test_ai/visual_results", exist_ok=True)
-    summary_plot_path = "test_ai/visual_results/test_summary_chart.png"
-    plt.savefig(summary_plot_path)
-    print(f"📊 Saved summary chart to {summary_plot_path}")
+TOP_K = 10  # Number of top matches to consider for evaluation
+MAX_K = 10  # Max value of K to plot Top-K accuracy curve
 
 
 def run_similarity_test():
@@ -84,15 +21,21 @@ def run_similarity_test():
     # Load FAISS index
     index = faiss.read_index(FAISS_INDEX_PATH)
 
-    # Load test labels
+    # Load test cases (each contains a query image path and expected post ID(s))
     with open(TEST_LABELS_PATH, "r") as f:
         test_cases = json.load(f)
 
+    # Init counters and containers
     total = len(test_cases)
     top1_correct = 0
     topk_correct = 0
     recallk_correct = 0
+    # For Top-K accuracy curve
+    accuracy_by_k = {k: 0 for k in range(1, MAX_K + 1)}
+    rank_hits = []      # Track rank of correct match
+    top1_scores = []    # Track similarity scores (cosine distances) of top-1
 
+    # Loop through test cases
     for case in test_cases:
         image_path = case["query_image_path"]
         true_ids = case["true_post_id"]
@@ -103,48 +46,76 @@ def run_similarity_test():
 
         try:
             image = Image.open(image_path).convert("RGB")
+
+            # Skip if image too small
             if is_too_small(image):
                 print(f"⚠️ Skipping small image: {image_path}")
                 continue
 
+            # Cat detection
             detections = detect_cats(image)
             if len(detections) == 0:
                 print(f"❌ No cat detected in {image_path}")
                 continue
 
+            # Extract features from cropped cat regions
             cat_crops = crop_cats(image, detections)
             cat_features = extract_cat_features(cat_crops)
             features_np = np.array(cat_features, dtype=np.float32)
             features_np = features_np / \
                 np.linalg.norm(features_np, axis=1, keepdims=True)
 
+            # Perform FAISS search
             distances, faiss_ids = index.search(features_np, k=TOP_K)
 
-            # Collect all predicted image_ids from all crops
+            # Track predictions and evaluation metrics
             all_image_ids = []
             top1_hit = False
             recall_hit = False
+            found_k = set()
 
-            for crop_result in faiss_ids:
-                topk_ids = [str(fid // 100)
-                            for fid in crop_result if fid != -1]
-                all_image_ids.extend(topk_ids)
+            # Evaluate each crop
+            for crop_result, dist_result in zip(faiss_ids, distances):
+                topk_ids_full = [str(fid // 100)
+                                 for fid in crop_result if fid != -1]
+                all_image_ids.extend(topk_ids_full[:TOP_K])
 
-                # Log top-k prediction for this crop
-                print(f"\n Image: {image_path}")
-                print(f"   Top-{TOP_K} predictions: {topk_ids}")
-
-                if topk_ids and topk_ids[0] in true_ids:
+                # Top-1 accuracy check
+                if topk_ids_full and topk_ids_full[0] in true_ids:
                     top1_hit = True
-                if any(tid in true_ids for tid in topk_ids):
+
+                 # Top-K recall
+                if any(tid in true_ids for tid in topk_ids_full):
                     recall_hit = True
 
+                # Track rank of true match
+                match_rank = None
+                for idx, pred_id in enumerate(topk_ids_full):
+                    if pred_id in true_ids:
+                        match_rank = idx
+                        break
+                if match_rank is not None:
+                    rank_hits.append(match_rank)
+
+                # Save top-1 distance for histogram
+                if dist_result[0] != -1:
+                    top1_scores.append(dist_result[0])
+
+                # Top-K accuracy for various K
+                for k in range(1, MAX_K + 1):
+                    topk_ids = topk_ids_full[:k]
+                    if any(tid in true_ids for tid in topk_ids):
+                        found_k.add(k)
+
+            # Update global counters
             if top1_hit:
                 top1_correct += 1
             if any(tid in all_image_ids for tid in true_ids):
                 topk_correct += 1
             if recall_hit:
                 recallk_correct += 1
+            for k in found_k:
+                accuracy_by_k[k] += 1
 
             # Save visual result
             save_visual_result(
@@ -158,13 +129,26 @@ def run_similarity_test():
         except Exception as e:
             print(f"⚠️ Error processing {image_path}: {str(e)}")
 
-    print("\n Test Results:")
+    # Normalize Top-K accuracy
+    for k in accuracy_by_k:
+        accuracy_by_k[k] /= total
+
+    # Compute MRR
+    mrr = compute_mrr(rank_hits)
+
+    # Final results
+    print("\nTest Results:")
     print(f"Total Queries: {total}")
     print(f"  Top-1 Accuracy: {top1_correct / total * 100:.2f}%")
     print(f"  Top-{TOP_K} Accuracy: {topk_correct / total * 100:.2f}%")
     print(f"  Recall@{TOP_K}: {recallk_correct / total * 100:.2f}%")
+    print(f"  Mean Reciprocal Rank (MRR): {mrr:.4f}")
 
-    plot_test_summary(top1_correct, topk_correct, recallk_correct, total)
+    # Plot visual summaries
+    os.makedirs("test_ai/visual_results", exist_ok=True)
+    plot_accuracy_over_k(accuracy_by_k)
+    plot_rank_histogram(rank_hits, k=TOP_K)
+    plot_similarity_distribution(top1_scores)
 
 
 if __name__ == "__main__":
