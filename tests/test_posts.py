@@ -76,6 +76,69 @@ async def test_create_post(monkeypatch, dummy_image, mock_post_data):
     assert post.cat_name == "Milo"
     assert post.cat_image.image_id == "1"
 
+@pytest.mark.asyncio
+async def test_create_post_without_location(monkeypatch, dummy_image, mock_post_data):
+    # Remove location from payload
+    incomplete_data = {k: v for k, v in mock_post_data.items() if k != "location"}
+
+    mock_uploaded_image = {
+        "image_id": "1",
+        "stored_filename": "cat.jpg",
+        "image_path": "uploads/cat.jpg",
+        "faiss_ids": [100, 101, 102],
+    }
+
+    # Mock upload and get_next_post_id
+    monkeypatch.setattr("routes.posts.upload_cat_image", AsyncMock(return_value=mock_uploaded_image))
+    monkeypatch.setattr("routes.posts.get_next_post_id", AsyncMock(return_value="1"))
+    monkeypatch.setattr("routes.posts.refresh_faiss_index", lambda: None)
+
+    mock_collection = AsyncMock()
+    mock_collection.insert_one.return_value.inserted_id = "mocked_id"
+
+    class FakeDatabase:
+        def __getitem__(self, name):
+            return mock_collection
+
+    db_module.db.database = FakeDatabase()
+
+    # Attach image file
+    files = {
+        "cat_image": ("dummy.jpg", dummy_image.read_bytes(), "image/jpeg")
+    }
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        response = await ac.post("/api/v1/posts/", data=incomplete_data, files=files)
+
+    # Expect failure due to missing required field
+    assert response.status_code == 422
+    assert "location" in response.text
+
+@pytest.mark.asyncio
+async def test_create_post_without_image(monkeypatch, mock_post_data):
+    # Mock post ID and skip image upload
+    monkeypatch.setattr("routes.posts.get_next_post_id", AsyncMock(return_value="1"))
+    monkeypatch.setattr("routes.posts.refresh_faiss_index", lambda: None)
+
+    # Mock DB collection
+    mock_collection = AsyncMock()
+    mock_collection.insert_one.return_value.inserted_id = "mocked_id"
+
+    class FakeDatabase:
+        def __getitem__(self, name):
+            return mock_collection
+
+    db_module.db.database = FakeDatabase()
+
+    # No files (no image upload)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        response = await ac.post("/api/v1/posts/", data=mock_post_data)
+
+    # Expect 422 because image is required
+    assert response.status_code == 422
+    assert "cat_image" in response.text
 
 @pytest.mark.asyncio
 async def test_get_all_posts(monkeypatch):
