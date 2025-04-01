@@ -12,8 +12,7 @@ from pytz import timezone
 import asyncio
 from utils.search_utils import find_similar_posts_by_post_id
 # Load environment
-env_path = Path(__file__).parent.parent / ".env"
-load_dotenv(dotenv_path=env_path)
+load_dotenv()
 
 # Email Configuration
 SMTP_SERVER = "smtp.gmail.com"
@@ -53,80 +52,58 @@ def send_email(recipient_email, subject, body_plain, body_html=None):
         print(f"❌ Error sending email to {recipient_email}: {e}")
 
 
+from collections import defaultdict
+
 async def send_daily_email_notifications():
     print("⏰ Running email notification job...")
     posts_to_notify = await db.database["posts_v2"].find(
         {"email_notification": True}
     ).to_list(length=100)
+
+    user_matches = defaultdict(list)
+
     for post in posts_to_notify:
         try:
-            # Find similar posts for each post
             similar_posts, _ = await find_similar_posts_by_post_id(post["post_id"], radius_km=20)
             if similar_posts:
-                # If similar posts are found, create a list of links to each post
-                subject = "แจ้งเตือน: มีโพสต์ใหม่เกี่ยวกับแมวของคุณ"
-                
-                # Prepare plain text email body
-                similar_posts_links = "\n".join(
-                    [f"- {similar_post['cat_name'] if similar_post['cat_name'] else f'โพสต์ {index + 1}'} : {FRONTEND_URL}/cat-detail/{similar_post['post_id']}"
-                     for index, similar_post in enumerate(similar_posts)]
-                )
-                body_plain = (
-                    f"มีโพสต์ใหม่เกี่ยวกับแมวของคุณ:\n\n"
-                    f"โพสต์ที่คล้ายกัน:\n"
-                    f"{similar_posts_links}\n\n"
-                    f"หากคุณยังไม่พบแมวของคุณ, คุณสามารถลองค้นหาเพิ่มเติมได้ที่ "
-                    f"FindMyMeow: {FRONTEND_URL}/cat-detail/{post['post_id']}"
-                )
+                user_email = post.get("user_email")
+                if user_email:
+                    user_matches[user_email].extend(similar_posts)
+        except Exception as e:
+            print(f"❌ Failed for post {post.get('post_id', 'unknown')}: {e}")
 
-                # Prepare HTML email body
-                similar_posts_html = "".join(
-                    [f'<p><a href="{FRONTEND_URL}/cat-detail/{similar_post["post_id"]}">โพสต์ {index + 1}</a></p>'
-                        for index, similar_post in enumerate(similar_posts)])
+    for user_email, matched_posts in user_matches.items():
+        try:
+            subject = "แจ้งเตือน: มีโพสต์ใหม่เกี่ยวกับแมวของคุณ"
+            similar_posts_links = "\n".join(
+                [f"- {p['cat_name'] or f'โพสต์ {i+1}'}: {FRONTEND_URL}/cat-detail/{p['post_id']}" 
+                 for i, p in enumerate(matched_posts)]
+            )
+            body_plain = (
+                f"มีโพสต์ใหม่เกี่ยวกับแมวของคุณ:\n\n"
+                f"{similar_posts_links}\n\n"
+                f"ไปที่เว็บไซต์ FindMyMeow เพื่อติดตามเพิ่มเติม"
+            )
 
-                body_html = f"""
-                <html>
-                  <body style="font-family:sans-serif; color:#333;">
-                    <h2>🐾 มีโพสต์ใหม่เกี่ยวกับแมวของคุณ:</h2>
-                    <p>โพสต์ที่คล้ายกัน:</p>
-                    {similar_posts_html}
-                    <p>หากคุณยังไม่พบแมวที่คุณกำลังตามหา, คุณสามารถลองค้นหาเพิ่มเติมได้ที่
-                    <a href="{FRONTEND_URL}/cat-detail/{post['post_id']}">FindMyMeow</a></p>
-                  </body>
-                </html>
-                """
+            similar_posts_html = "".join(
+                [f'<p><a href="{FRONTEND_URL}/cat-detail/{p["post_id"]}">โพสต์ {i+1}</a></p>' 
+                 for i, p in enumerate(matched_posts)]
+            )
+            body_html = f"""
+            <html>
+              <body style="font-family:sans-serif; color:#333;">
+                <h2>🐾 มีโพสต์ใหม่เกี่ยวกับแมวของคุณ:</h2>
+                {similar_posts_html}
+                <p>ดูเพิ่มเติมได้ที่ <a href="{FRONTEND_URL}">FindMyMeow</a></p>
+              </body>
+            </html>
+            """
 
-            else:
-                print(f"⚠️ No similar posts found for post {post.get('post_id', 'unknown')}")
-                
-                # If no similar posts are found, suggest the general search URL
-                subject = "แจ้งเตือน: ยังไม่พบโพสต์ที่คล้ายกับแมวของคุณ"
-                body_plain = (
-                    f"ขอโทษค่ะ, ยังไม่พบโพสต์ที่คล้ายกับแมวของคุณ:\n\n"
-                    f"หากคุณยังไม่พบแมวที่คุณกำลังตามหา, คุณสามารถลองค้นหาเพิ่มเติมได้ที่ "
-                    f"FindMyMeow: {FRONTEND_URL}/search-cat\n\n"
-                )
-
-                body_html = f"""
-               <html>
-                <body style="font-family:sans-serif; color:#333;">
-                    <h2>🐾 ขอโทษค่ะ, ยังไม่พบโพสต์ที่คล้ายกับแมวของคุณ:</h2>
-                     <p>หากคุณยังไม่พบแมวที่คุณกำลังตามหา, คุณสามารถลองค้นหาเพิ่มเติมได้ที่
-                     <a href="{FRONTEND_URL}/search-cat">FindMyMeow</a></p>
-                    </body>
-                </html>
-                """
-
-            user_email = post.get("user_email")
             loop = asyncio.get_running_loop()
-            if user_email:
-                await loop.run_in_executor(None, send_email, user_email, subject, body_plain, body_html)
-
-            else:
-                print("⚠️ Missing user_email for post:", post.get("post_id", "unknown"))
+            await loop.run_in_executor(None, send_email, user_email, subject, body_plain, body_html)
 
         except Exception as e:
-            print(f"❌ Failed to send email for post {post.get('post_id', 'unknown')}: {e}")
+            print(f"❌ Failed to send to {user_email}: {e}")
 
     print("✅ Finished sending notifications:", datetime.now(timezone("Asia/Bangkok")).strftime("%Y-%m-%d %H:%M:%S"))
 
@@ -143,7 +120,7 @@ async def run_email_every_11_AM(send_function):
         if now.hour == 11:
             print(f"✅ Sending email at {now.strftime('%H:%M:%S')}")
             await send_function()
-            print(f"✅ Email sent, waiting for the next day at 10:00 PM...")
+            print(f"✅ Email sent, waiting for the next day at 11:00 AM...")
             await asyncio.sleep(24 * 60 * 60)  # Wait for 24 hours (1 day) before sending again
         else:
             # Wait for 60 min before checking again
