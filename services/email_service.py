@@ -52,60 +52,70 @@ def send_email(recipient_email, subject, body_plain, body_html=None):
         print(f"❌ Error sending email to {recipient_email}: {e}")
 
 
-from collections import defaultdict
-
 async def send_daily_email_notifications():
     print("⏰ Running email notification job...")
     posts_to_notify = await db.database["posts_v2"].find(
         {"email_notification": True}
     ).to_list(length=100)
 
-    user_matches = defaultdict(list)
-
     for post in posts_to_notify:
         try:
             similar_posts, _ = await find_similar_posts_by_post_id(post["post_id"], radius_km=20)
+
+            user_email = post.get("user_email")
+            if not user_email:
+                print("⚠️ Missing user_email for post:", post.get("post_id", "unknown"))
+                continue
+
             if similar_posts:
-                user_email = post.get("user_email")
-                if user_email:
-                    user_matches[user_email].extend(similar_posts)
+                subject = "แจ้งเตือน: มีโพสต์ใหม่เกี่ยวกับแมวของคุณ"
+
+                similar_posts_links = "\n".join(
+                    [f"- {p['cat_name'] or f'โพสต์ {i+1}'}: {FRONTEND_URL}/cat-detail/{p['post_id']}" 
+                     for i, p in enumerate(similar_posts)]
+                )
+                body_plain = (
+                    f"📢 โพสต์ของคุณ:\n"
+                    f"- ชื่อแมว: {post.get('cat_name', '-')}\n"
+                    f"- สี: {post.get('color', '-')}\n"
+                    f"- เพศ: {'เพศเมีย' if post.get('gender') == 'female' else 'เพศผู้'}\n"
+                    f"📌 มีโพสต์ใหม่ที่คล้ายกัน:\n"
+                    f"{similar_posts_links}\n\n"
+                    f"🔗 ดูโพสต์ของคุณ: {FRONTEND_URL}/cat-detail/{post['post_id']}"
+                )
+
+                similar_posts_html = "".join(
+                    [f'<p><a href="{FRONTEND_URL}/cat-detail/{p["post_id"]}">โพสต์ {i+1}</a></p>' 
+                     for i, p in enumerate(similar_posts)]
+                )
+                body_html = f"""
+                <html>
+                  <body style="font-family:sans-serif; color:#333;">
+                    <h2>🐾 โพสต์ของคุณ</h2>
+                    <ul>
+                      <li><strong>ชื่อแมว:</strong> {post.get('cat_name', '-')}</li>
+                      <li><strong>สี:</strong> {post.get('color', '-')}</li>
+                      <li><strong>เพศ:</strong> {"เพศเมีย" if post.get("gender") == "female" else "เพศผู้"}</li>
+                    </ul>
+                    <h3>📢 มีโพสต์ใหม่ที่คล้ายกัน:</h3>
+                    {similar_posts_html}
+                    <p>🔗 ดูโพสต์ของคุณ <a href="{FRONTEND_URL}/cat-detail/{post['post_id']}">ที่นี่</a></p>
+                  </body>
+                </html>
+                """
+
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, send_email, user_email, subject, body_plain, body_html)
+                print(f"📬 Sent to {user_email} for post {post['post_id']}")
+
+            else:
+                print(f"⚠️ No similar posts found for post {post.get('post_id', 'unknown')}")
+
         except Exception as e:
-            print(f"❌ Failed for post {post.get('post_id', 'unknown')}: {e}")
+            print(f"❌ Failed to send for post {post.get('post_id', 'unknown')}: {e}")
 
-    for user_email, matched_posts in user_matches.items():
-        try:
-            subject = "แจ้งเตือน: มีโพสต์ใหม่เกี่ยวกับแมวของคุณ"
-            similar_posts_links = "\n".join(
-                [f"- {p['cat_name'] or f'โพสต์ {i+1}'}: {FRONTEND_URL}/cat-detail/{p['post_id']}" 
-                 for i, p in enumerate(matched_posts)]
-            )
-            body_plain = (
-                f"มีโพสต์ใหม่เกี่ยวกับแมวของคุณ:\n\n"
-                f"{similar_posts_links}\n\n"
-                f"ไปที่เว็บไซต์ FindMyMeow เพื่อติดตามเพิ่มเติม"
-            )
+    print("✅ All notifications processed:", datetime.now(timezone("Asia/Bangkok")).strftime("%Y-%m-%d %H:%M:%S"))
 
-            similar_posts_html = "".join(
-                [f'<p><a href="{FRONTEND_URL}/cat-detail/{p["post_id"]}">โพสต์ {i+1}</a></p>' 
-                 for i, p in enumerate(matched_posts)]
-            )
-            body_html = f"""
-            <html>
-              <body style="font-family:sans-serif; color:#333;">
-                <h2>🐾 มีโพสต์ใหม่เกี่ยวกับแมวของคุณ:</h2>
-                {similar_posts_html}
-                <p>ดูเพิ่มเติมได้ที่ <a href="{FRONTEND_URL}">FindMyMeow</a></p>
-              </body>
-            </html>
-            """
-
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, send_email, user_email, subject, body_plain, body_html)
-
-        except Exception as e:
-            print(f"❌ Failed to send to {user_email}: {e}")
-
-    print("✅ Finished sending notifications:", datetime.now(timezone("Asia/Bangkok")).strftime("%Y-%m-%d %H:%M:%S"))
 
 async def run_email_every_11_AM(send_function):
     tz = timezone("Asia/Bangkok")
