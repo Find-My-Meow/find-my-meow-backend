@@ -4,6 +4,7 @@ from core.database import lifespan
 from routes.posts import post_router
 from routes.search import search_router
 from routes.image import image_router
+from services.email_service import send_daily_email_notifications
 
 
 app = FastAPI(lifespan=lifespan)
@@ -27,3 +28,7 @@ app.include_router(search_router, prefix="/api/v1/search", tags=["Search"])
 async def root():
     return {"message": "Welcome to FindMyMeow API"}
 
+@app.post("/send-daily-emails")
+async def trigger_email_notifications():
+    await send_daily_email_notifications()
+    return {"message": "Email notifications sent"}

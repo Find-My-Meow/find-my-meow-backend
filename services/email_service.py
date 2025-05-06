@@ -60,7 +60,7 @@ async def send_daily_email_notifications():
 
     for post in posts_to_notify:
         try:
-            similar_posts, _ = await find_similar_posts_by_post_id(post["post_id"], radius_km=20)
+            similar_posts, _ = await find_similar_posts_by_post_id(post["post_id"], radius_km=20, similarity_threshold=0.80)
 
             user_email = post.get("user_email")
             if not user_email:
